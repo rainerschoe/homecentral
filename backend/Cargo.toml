@@ -1,0 +1,8 @@
+[package]
+name = "homecentral_backend"
+version = "0.1.0"
+authors = ["Rainer Schoenberger <rainer-homecentral@wwad.de>"]
+edition = "2021"
+
+
+[dependencies]
