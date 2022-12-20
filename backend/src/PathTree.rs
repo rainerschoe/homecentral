@@ -13,7 +13,7 @@ impl PathElement
         use PathElement::*;
         match self 
         {
-            Root => self == other,
+            Root => self == other || matches!(other, Wildcard),
             Name(_) => self == other || matches!(other, Wildcard),
             Wildcard => true
         }
@@ -133,7 +133,41 @@ impl<T> PathTree<T>
 }
 
 #[test]
-fn add_subscriber()
+#[ignore = "tofireasonx"]
+fn test_add_payload_to_root()
+{
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&[Root], "data");
+    assert!(tree.element == Root);
+    assert!(tree.childs.len() == 0);
+    assert!(tree.payloads.len() == 1);
+    assert!(tree.payloads[0] == "data");
+}
+
+#[test]
+fn test_add_payload_to_2root()
+{
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&[Root, Root], "data");
+    assert!(tree.element == Root);
+    assert!(tree.childs.len() == 0);
+    assert!(tree.payloads.len() == 1);
+    assert!(tree.payloads[0] == "data");
+}
+
+#[test]
+#[should_panic]
+fn test_add_payload_to_root_in_the_middle()
+{
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&[Root, Name("test".into()), Root], "data");
+}
+
+#[test]
+fn test_add_payload()
 {
     use PathElement::*;
     let mut tree = PathTree::<&str>::new();
@@ -146,7 +180,7 @@ fn add_subscriber()
 }
 
 #[test]
-fn add_2subscriber_same_path()
+fn test_add_2payload_same_path()
 {
     use PathElement::*;
     let mut tree = PathTree::<&str>::new();
@@ -161,7 +195,7 @@ fn add_2subscriber_same_path()
 }
 
 #[test]
-fn add_2subscriber_different_path()
+fn test_add_2payload_different_path()
 {
     use PathElement::*;
     let mut tree = PathTree::<&str>::new();
@@ -178,7 +212,7 @@ fn add_2subscriber_different_path()
 }
 
 #[test]
-fn add_2subscriber_different_deep_path()
+fn test_add_2payload_different_deep_path()
 {
     use PathElement::*;
     let mut tree = PathTree::<&str>::new();
@@ -201,4 +235,95 @@ fn add_2subscriber_different_deep_path()
     assert!(tree.childs[1].childs[0].payloads.len() == 1);
     assert!(tree.childs[1].childs[0].payloads[0] == "data2");
 
+}
+
+
+#[test]
+fn test_get_payloads()
+{
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    let path = [Root, Name("test".into())];
+    tree.add_payload(&path, "data");
+    assert!(tree.get_payloads(&[Wildcard, Wildcard]).len() == 1);
+    assert!(tree.get_payloads(&[Wildcard, Wildcard])[0] == &"data");
+    assert!(tree.get_payloads(&[Root, Wildcard]).len() == 1);
+    assert!(tree.get_payloads(&[Root, Wildcard])[0] == &"data");
+    assert!(tree.get_payloads(&path).len() == 1);
+    assert!(tree.get_payloads(&path)[0] == &"data");
+}
+
+#[test]
+fn test_get_payloads_relative_path()
+{
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    let path = [Root, Name("l1".into()), Name("l2".into())];
+    tree.add_payload(&path, "data");
+    assert!(tree.childs.len() == 1);
+    assert!(tree.childs[0].get_payloads(&[Wildcard, Wildcard]).len() == 1);
+    assert!(tree.childs[0].get_payloads(&[Wildcard, Wildcard])[0] == &"data");
+    assert!(tree.childs[0].childs.len() == 1);
+    assert!(tree.childs[0].childs[0].get_payloads(&[Wildcard]).len() == 1);
+    assert!(tree.childs[0].childs[0].get_payloads(&[Wildcard])[0] == &"data");
+    assert!(tree.childs[0].get_payloads(&path).len() == 0);
+}
+
+#[test]
+fn test_get_2payloads_same_path()
+{
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    let path = [Root, Name("test".into())];
+    tree.add_payload(&path, "data");
+    tree.add_payload(&path, "data2");
+    assert!(tree.get_payloads(&[Wildcard, Wildcard]).len() == 2);
+    assert!(tree.get_payloads(&[Wildcard, Wildcard])[0] == &"data");
+    assert!(tree.get_payloads(&[Root, Wildcard]).len() == 2);
+    assert!(tree.get_payloads(&[Root, Wildcard])[1] == &"data2");
+    assert!(tree.get_payloads(&path).len() == 2);
+    assert!(tree.get_payloads(&path)[0] == &"data");
+    assert!(tree.get_payloads(&path)[1] == &"data2");
+}
+
+#[test]
+fn test_get_2payload_different_path()
+{
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    let path1 = [Root, Name("test".into())];
+    let path2 = [Root, Name("test2".into())];
+    tree.add_payload(&path1, "data");
+    tree.add_payload(&path2, "data2");
+    assert!(tree.get_payloads(&[Root]).len() == 0);
+    assert!(tree.get_payloads(&[Root, Wildcard]).len() == 2);
+    assert!(tree.get_payloads(&[Root, Wildcard])[0] == &"data");
+    assert!(tree.get_payloads(&[Root, Wildcard])[1] == &"data2");
+    assert!(tree.get_payloads(&path1).len() == 1);
+    assert!(tree.get_payloads(&path2).len() == 1);
+    assert!(tree.get_payloads(&path1)[0] == &"data");
+    assert!(tree.get_payloads(&path2)[0] == &"data2");
+}
+
+#[test]
+fn test_get_2path_different_deep_path()
+{
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    let path1 = [Root, Name("l1".into()), Name("l12".into())];
+    let path2 = [Root, Name("l1".into()), Name("l22".into())];
+    tree.add_payload(&path1, "data1");
+    tree.add_payload(&path2, "data2");
+    assert!(tree.get_payloads(&[Root]).len() == 0);
+    assert!(tree.get_payloads(&[Root, Wildcard]).len() == 0);
+    assert!(tree.get_payloads(&[Root, Wildcard, Name("l12".into())]).len() == 1);
+    assert!(tree.get_payloads(&[Root, Wildcard, Name("l12".into())])[0] == &"data1");
+    assert!(tree.get_payloads(&[Root, Wildcard, Wildcard]).len() == 2);
+    assert!(tree.get_payloads(&[Root, Wildcard, Wildcard])[0] == &"data1");
+    assert!(tree.get_payloads(&[Root, Wildcard, Wildcard])[1] == &"data2");
+
+    assert!(tree.get_payloads(&path1).len() == 1);
+    assert!(tree.get_payloads(&path2).len() == 1);
+    assert!(tree.get_payloads(&path1)[0] == &"data1");
+    assert!(tree.get_payloads(&path2)[0] == &"data2");
 }
