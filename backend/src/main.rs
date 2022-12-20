@@ -28,15 +28,14 @@ impl DataLake
         DataLake{subscriptions: HashMap::new()}
     }
 
-    async fn publish<T : 'static /* for TypeId */ + Clone /* for sending to multi subscribers */ + std::fmt::Debug /* for tokio mpsc */>(self: &mut Self, path: &str, object: T)
+    async fn publish<T : 'static /* for TypeId */ + Clone /* for sending to multi subscribers */ + std::fmt::Debug /* for tokio mpsc */>(self: &mut Self, path: &[PathTree::PathElement], object: T)
     {
         let type_id = TypeId::of::<T>();
         let boxed_object = Box::new(object);
         let possible_subscribers = self.subscriptions.entry(type_id).or_insert(PathTree::PathTree::<Subscriber>::new()); // FIXME: should not insert here!
 
-        // TODO: handle multi level path
         for subscriber in
-        possible_subscribers.get_payloads(&[PathTree::PathElement::Root, PathTree::PathElement::Name(path.into())])
+        possible_subscribers.get_payloads(path)
         {
             let sender = match subscriber.transmitter.downcast_ref::<tokio::sync::mpsc::Sender<T>>()
             {
@@ -47,16 +46,18 @@ impl DataLake
         }
     }
 
-    fn subscribe<T: 'static>(self: &mut Self, path: &str) -> Fisher<T>
+    fn subscribe<T: 'static>(self: &mut Self, path: &[PathTree::PathElement]) -> Fisher<T>
     {
         let type_id = TypeId::of::<T>();
 
         let (tx, rx) = tokio::sync::mpsc::channel::<T>(10); // Buffer of hard coded size for now, if more elements queued, backpressure active i.e. send() will block
 
-        // TODO: handle multi level path
-        self.subscriptions.entry(type_id).or_insert(PathTree::PathTree::<Subscriber>::new())
-             .add_payload(&[PathTree::PathElement::Name(path.into())], 
-                 Subscriber{transmitter : Box::new(tx)}
+        self.subscriptions
+            .entry(type_id)
+            .or_insert(PathTree::PathTree::<Subscriber>::new())
+            .add_payload(
+                path, 
+                Subscriber{transmitter : Box::new(tx)}
              );
 
         Fisher{receiver: rx}
@@ -73,9 +74,14 @@ async fn single_publish_single_subscribe()
 {
     let mut datalake = DataLake::new();
 
-    let mut fisher = datalake.subscribe::<&str>("test");
+    let test_path =
+        &[
+        PathTree::PathElement::Root,
+        PathTree::PathElement::Name("test".into())
+        ];
+    let mut fisher = datalake.subscribe::<&str>(test_path);
 
-    datalake.publish::<&str>("test", "data").await;
+    datalake.publish::<&str>(test_path, "data").await;
 
     let asd = fisher.receiver.try_recv();
     match asd
@@ -90,10 +96,15 @@ async fn single_publish_multi_subscribe()
 {
     let mut datalake = DataLake::new();
 
-    let mut fisher1 = datalake.subscribe::<&str>("test");
-    let mut fisher2 = datalake.subscribe::<&str>("test");
+    let test_path =
+        &[
+        PathTree::PathElement::Root,
+        PathTree::PathElement::Name("test".into())
+        ];
+    let mut fisher1 = datalake.subscribe::<&str>(test_path);
+    let mut fisher2 = datalake.subscribe::<&str>(test_path);
 
-    datalake.publish("test", "data").await;
+    datalake.publish(test_path, "data").await;
 
     let asd = fisher1.receiver.try_recv();
     match asd
