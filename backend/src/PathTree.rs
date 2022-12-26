@@ -1,14 +1,40 @@
+use std::{sync::Arc, iter::TrustedLen};
+
 #[derive(PartialEq, Clone)]
 pub enum PathElement
 {
     Root,
     Name(String),
-    Wildcard
+    Wildcard((usize, usize)) // (Min, Max) : Number of consumed nodes are any between Min and Max inclusive.
 }
+
+fn consume_wildcard(wildcard: &mut (usize, usize)) -> bool
+{
+    if(wildcard.0 > 0)
+    {
+        wildcard.0 -= 1;
+    }
+    else if (wildcard.1 > 0){
+        wildcard.1 -= 1;
+    }
+    else {
+        return true;
+    }
+    if (wildcard.0 == 0) && (wildcard.1 == 0)
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+use PathElement::*;
 
 impl PathElement
 {
-    fn matches(self: &Self, other: &Self) -> bool
+    fn matches(self: &mut Self, other: &mut Self) -> bool
     {
         use PathElement::*;
         match self 
@@ -103,32 +129,278 @@ impl<T> PathTree<T>
 
     pub fn get_payloads(self: &Self, path: &[PathElement]) -> Vec<&T>
     {
-        if path.is_empty()
+        struct Job<'a, T>
         {
-            return Vec::new();
+            path: &'a [PathElement],
+            path_wildcard_override: Option<(usize,usize)>,
+
+            tree: &'a PathTree<T>,
+            tree_wildcard_override: Option<(usize,usize)>,
         }
 
-        // determine if this level in path matches the current level in the tree:
-        let matches = self.element.matches(&path[0]);
-        if !matches
-        {
-            return Vec::new();
-        }
+        let initial_job = Job{
+                                    path: path,
+                                    path_wildcard_override: None,
+                                    tree: self,
+                                    tree_wildcard_override: None
+                                    };
 
-        // now handle childs:
-        if path.len() == 1
-        {
-            // we are at the end of the path (not necessary the end of the tree) and have a match :) YAY!!
-            // return all payloads
-            return Vec::from_iter(self.payloads.iter());
-        }
+        let mut jobs = Vec::new();
+        jobs.push(initial_job);
 
         let mut result = Vec::new();
-        for sub_tree in self.childs.iter()
-        {
-            result.append(&mut sub_tree.get_payloads(&path[1..]));
+        'jobloop:
+        loop {
+            if jobs.is_empty()
+            {
+                break 'jobloop;
+            }
+            let job = jobs.pop().unwrap();
+            let tree = job.tree;
+            let path = job.path;
+            let tree_wildcard_override = job.tree_wildcard_override;
+            let path_wildcard_override = job.path_wildcard_override;
+
+            if path.is_empty()
+            {
+                result.extend_from_slice(&tree.payloads[..]);
+                continue 'jobloop;
+            }
+
+            let tree_node = tree.element.clone();
+            let path_node = path[0].clone();
+            match tree_node
+            {
+                Name(tree_node_name) =>
+                {
+                    match path_node
+                    {
+                        // Name + Name
+                        Name(path_node_name) =>
+                        {
+                            // match -> add all childs to job list
+                            if tree_node_name == path_node_name
+                            {
+                                for child in self.childs.iter()
+                                {
+                                    let job = Job{
+                                        path: path[1..],
+                                        path_wildcard_override: None,
+                                        tree: child,
+                                        tree_wildcard_override: None
+                                        };
+                                    jobs.push(job);
+                                }
+                            }
+                            else
+                            {
+                                // no match -> ignore this arm
+                                continue 'jobloop;
+                            }
+                        },
+                        // tree:Name + path:Wildcard
+                        Wildcard(path_wildcard) =>
+                        {
+                            let mut path_wildcard = match job.path_wildcard_override
+                            {
+                                Some(wc_override) => wc_override,
+                                None => path_wildcard
+                            };
+                            
+                            if path_wildcard.0 == 0 and path_wildcard.1 == 0
+                            {
+                                // invalid wildcard
+                                // remove it and contine
+                                let job = Job{
+                                    path: &path[1..], // full path, as WC might not be fully consumed
+                                    path_wildcard_override: None,
+                                    tree: &self,
+                                    tree_wildcard_override: None
+                                    };
+                                jobs.push(job);
+                                continue 'jobloop;
+                            }
+
+                            // When minimums is 0, we also have the choice to NOT consume and skip the wildcard
+                            if path_wildcard.0 == 0
+                            {
+                                // remove it
+                                let job = Job{
+                                    path: &path[1..], // full path, as WC might not be fully consumed
+                                    path_wildcard_override: None,
+                                    tree: &self,
+                                    tree_wildcard_override: None
+                                    };
+                                jobs.push(job);
+                            }
+
+                            // consuming is always an option:
+                            // add all childs after consuming one from the wildcard
+                            for child in self.childs.iter()
+                            {
+                                let mut new_path_wildcard = path_wildcard.clone();
+                                consume_wildcard(new_path_wildcard);
+                                let job = Job{
+                                    path: &path[..], // full path, as WC might not be fully consumed
+                                    path_wildcard_override: new_path_wildcard,
+                                    tree: child,
+                                    tree_wildcard_override: None
+                                    };
+                                jobs.push(job);
+                            }
+
+                            
+                        }
+                    }
+                },
+                Root =>
+                {
+
+                },
+                Wildcard(tree_wildcard) => 
+                {
+                    // tree node is a wildcard => retrieve and override if required:
+                    let mut tree_wildcard = match job.tree_wildcard_override
+                    {
+                        Some(wc_override) => wc_override,
+                        None => tree_wildcard
+                    }
+
+                    match path_node 
+                    {
+                        // tree_node: Wildcard, path_node: Name
+                        Name(path_node_name) =>
+                        {
+                            if tree_wildcard.0 == 0 and tree_wildcard.1 == 0
+                            {
+                                // invalid wildcard
+                                // remove it and contine
+                                for child in self.child.iter()
+                                {
+                                    let job = Job{
+                                        path: &path[..], // full path, as WC might not be fully consumed
+                                        path_wildcard_override: None,
+                                        tree: child,
+                                        tree_wildcard_override: None
+                                        };
+                                    jobs.push(job);
+                                }
+                                continue 'jobloop;
+                            }
+
+                            // no minumums required, so we might also skip wildcard here:
+                            if tree_wildcard.0 == 0
+                            {
+                                for child in self.child.iter()
+                                {
+                                    let job = Job{
+                                        path: &path[..], // full path, as WC might not be fully consumed
+                                        path_wildcard_override: None,
+                                        tree: child,
+                                        tree_wildcard_override: None
+                                        };
+                                    jobs.push(job);
+                                }
+                            }
+
+                            // consuming is always an option for valid wildcards:
+                            for child in self.childs.iter()
+                            {
+                                let mut new_tree_wildcard = tree_wildcard.clone();
+                                consume_wildcard(&new_tree_wildcard);
+                                let job = Job{
+                                    path: path[1..],
+                                    path_wildcard_override: None,
+                                    tree: child,
+                                    tree_wildcard_override: Some(new_tree_wildcard)
+                                    };
+                                jobs.push(job);
+                            }
+                        }
+
+                        // tree_node: Wildcard, path_node: Wildcard (the tricky case)
+                        Wildcard(path_wildcard) =>
+                        {
+                            let mut path_wildcard = match job.path_wildcard_override
+                            {
+                                Some(wc_override) => wc_override,
+                                None => path_wildcard
+                            };
+
+                            // we reduce this scenario down to a set of single wildcard scenarios by recursively removing/consuming from one wildcard:
+
+                            if tree_wildcard.0 == 0 and tree_wildcard.1 == 0
+                            {
+                                // invalid tree wildcard
+                                // remove it and contine
+                                for child in self.child.iter()
+                                {
+                                    let job = Job{
+                                        path: &path[..], // full path, as WC might not be fully consumed
+                                        path_wildcard_override: None,
+                                        tree: child,
+                                        tree_wildcard_override: None
+                                        };
+                                    jobs.push(job);
+                                }
+                                continue 'jobloop;
+                            }
+
+                            if path_wildcard.0 == 0 and path_wildcard.1 == 0
+                            {
+                                // invalid path wildcard
+                                // remove it and contine
+                                let job = Job{
+                                    path: &path[1..], // full path, as WC might not be fully consumed
+                                    path_wildcard_override: None,
+                                    tree: self,
+                                    tree_wildcard_override: None
+                                    };
+                                jobs.push(job);
+                                continue 'jobloop;
+                            }
+
+
+                            // no minumums required, so we might also skip wildcard here:
+                            if tree_wildcard.0 == 0
+                            {
+                                for child in self.child.iter()
+                                {
+                                    let job = Job{
+                                        path: &path[..], // full path, as WC might not be fully consumed
+                                        path_wildcard_override: job.path_wildcard_override,
+                                        tree: child,
+                                        tree_wildcard_override: None
+                                        };
+                                    jobs.push(job);
+                                }
+                            }
+
+                            // consuming is always an option for valid wildcards:
+                            for child in self.childs.iter()
+                            {
+                                let mut new_tree_wildcard = tree_wildcard.clone();
+                                consume_wildcard(&mut new_tree_wildcard);
+
+                                let mut new_path_wildcard = path_wildcard.clone();
+                                consume_wildcard(&mut new_path_wildcard);
+                                let job = Job{
+                                    path: &path[..],
+                                    path_wildcard_override: Some(new_path_wildcard),
+                                    tree: child,
+                                    tree_wildcard_override: Some(new_tree_wildcard)
+                                    };
+                                jobs.push(job);
+                            }
+                        }
+                    }
+
+                }
+            }
         }
+
         return result;
+
     }
 }
 
@@ -245,10 +517,10 @@ fn test_get_payloads()
     let mut tree = PathTree::<&str>::new();
     let path = [Root, Name("test".into())];
     tree.add_payload(&path, "data");
-    assert!(tree.get_payloads(&[Wildcard, Wildcard]).len() == 1);
-    assert!(tree.get_payloads(&[Wildcard, Wildcard])[0] == &"data");
-    assert!(tree.get_payloads(&[Root, Wildcard]).len() == 1);
-    assert!(tree.get_payloads(&[Root, Wildcard])[0] == &"data");
+    assert!(tree.get_payloads(&[Wildcard((1,0)), Wildcard((1,0))]).len() == 1);
+    assert!(tree.get_payloads(&[Wildcard((1,0)), Wildcard((1,0))])[0] == &"data");
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 1);
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))])[0] == &"data");
     assert!(tree.get_payloads(&path).len() == 1);
     assert!(tree.get_payloads(&path)[0] == &"data");
 }
@@ -261,11 +533,11 @@ fn test_get_payloads_relative_path()
     let path = [Root, Name("l1".into()), Name("l2".into())];
     tree.add_payload(&path, "data");
     assert!(tree.childs.len() == 1);
-    assert!(tree.childs[0].get_payloads(&[Wildcard, Wildcard]).len() == 1);
-    assert!(tree.childs[0].get_payloads(&[Wildcard, Wildcard])[0] == &"data");
+    assert!(tree.childs[0].get_payloads(&[Wildcard((1,0)), Wildcard((1,0))]).len() == 1);
+    assert!(tree.childs[0].get_payloads(&[Wildcard((1,0)), Wildcard((1,0))])[0] == &"data");
     assert!(tree.childs[0].childs.len() == 1);
-    assert!(tree.childs[0].childs[0].get_payloads(&[Wildcard]).len() == 1);
-    assert!(tree.childs[0].childs[0].get_payloads(&[Wildcard])[0] == &"data");
+    assert!(tree.childs[0].childs[0].get_payloads(&[Wildcard((1,0))]).len() == 1);
+    assert!(tree.childs[0].childs[0].get_payloads(&[Wildcard((1,0))])[0] == &"data");
     assert!(tree.childs[0].get_payloads(&path).len() == 0);
 }
 
@@ -277,10 +549,10 @@ fn test_get_2payloads_same_path()
     let path = [Root, Name("test".into())];
     tree.add_payload(&path, "data");
     tree.add_payload(&path, "data2");
-    assert!(tree.get_payloads(&[Wildcard, Wildcard]).len() == 2);
-    assert!(tree.get_payloads(&[Wildcard, Wildcard])[0] == &"data");
-    assert!(tree.get_payloads(&[Root, Wildcard]).len() == 2);
-    assert!(tree.get_payloads(&[Root, Wildcard])[1] == &"data2");
+    assert!(tree.get_payloads(&[Wildcard((1,0)), Wildcard((1,0))]).len() == 2);
+    assert!(tree.get_payloads(&[Wildcard((1,0)), Wildcard((1,0))])[0] == &"data");
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 2);
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))])[1] == &"data2");
     assert!(tree.get_payloads(&path).len() == 2);
     assert!(tree.get_payloads(&path)[0] == &"data");
     assert!(tree.get_payloads(&path)[1] == &"data2");
@@ -296,9 +568,9 @@ fn test_get_2payload_different_path()
     tree.add_payload(&path1, "data");
     tree.add_payload(&path2, "data2");
     assert!(tree.get_payloads(&[Root]).len() == 0);
-    assert!(tree.get_payloads(&[Root, Wildcard]).len() == 2);
-    assert!(tree.get_payloads(&[Root, Wildcard])[0] == &"data");
-    assert!(tree.get_payloads(&[Root, Wildcard])[1] == &"data2");
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 2);
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))])[0] == &"data");
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))])[1] == &"data2");
     assert!(tree.get_payloads(&path1).len() == 1);
     assert!(tree.get_payloads(&path2).len() == 1);
     assert!(tree.get_payloads(&path1)[0] == &"data");
@@ -315,12 +587,12 @@ fn test_get_2path_different_deep_path()
     tree.add_payload(&path1, "data1");
     tree.add_payload(&path2, "data2");
     assert!(tree.get_payloads(&[Root]).len() == 0);
-    assert!(tree.get_payloads(&[Root, Wildcard]).len() == 0);
-    assert!(tree.get_payloads(&[Root, Wildcard, Name("l12".into())]).len() == 1);
-    assert!(tree.get_payloads(&[Root, Wildcard, Name("l12".into())])[0] == &"data1");
-    assert!(tree.get_payloads(&[Root, Wildcard, Wildcard]).len() == 2);
-    assert!(tree.get_payloads(&[Root, Wildcard, Wildcard])[0] == &"data1");
-    assert!(tree.get_payloads(&[Root, Wildcard, Wildcard])[1] == &"data2");
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 0);
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Name("l12".into())]).len() == 1);
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Name("l12".into())])[0] == &"data1");
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Wildcard((1,0))]).len() == 2);
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Wildcard((1,0))])[0] == &"data1");
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Wildcard((1,0))])[1] == &"data2");
 
     assert!(tree.get_payloads(&path1).len() == 1);
     assert!(tree.get_payloads(&path2).len() == 1);

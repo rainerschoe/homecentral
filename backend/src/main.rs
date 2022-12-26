@@ -28,7 +28,11 @@ impl DataLake
         DataLake{subscriptions: HashMap::new()}
     }
 
-    async fn publish<T : 'static /* for TypeId */ + Clone /* for sending to multi subscribers */ + std::fmt::Debug /* for tokio mpsc */>(self: &mut Self, path: &[PathTree::PathElement], object: T)
+    async fn publish
+    <
+    T : 'static /* for TypeId */ + Clone /* for sending to multi subscribers */ + std::fmt::Debug /* for tokio mpsc */
+    >
+    (self: &mut Self, path: &[PathTree::PathElement], object: T)
     {
         let type_id = TypeId::of::<T>();
         let boxed_object = Box::new(object);
