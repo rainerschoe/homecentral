@@ -1,11 +1,17 @@
-use std::{sync::Arc, iter::TrustedLen};
+//use std::{sync::Arc, iter::TrustedLen};
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum PathElement
 {
+    // we need a root element, which is only allowed at beginning of path. reason is, that we might have subscribers like this: s1:"/a" s2:"/b", s3:"/*/g", each starting with different path elements. however in a tree structure, we must start from a single node, which we define as Root here.
+    // Alternatively, user would need to provide a root node when creating the Tree. however this requires always specifying the same node on each subscribe and publish by the user.
     Root,
+
+    // A string element
     Name(String),
-    Wildcard((usize, usize)) // (Min, Max) : Number of consumed nodes are any between Min and Max inclusive.
+
+    // (Min, Max) : Number of consumed nodes are any between Min and Max inclusive.
+    Wildcard((usize, usize))
 }
 
 fn consume_wildcard(wildcard: &mut (usize, usize)) -> bool
@@ -31,20 +37,6 @@ fn consume_wildcard(wildcard: &mut (usize, usize)) -> bool
 }
 
 use PathElement::*;
-
-impl PathElement
-{
-    fn matches(self: &mut Self, other: &mut Self) -> bool
-    {
-        use PathElement::*;
-        match self 
-        {
-            Root => self == other || matches!(other, Wildcard),
-            Name(_) => self == other || matches!(other, Wildcard),
-            Wildcard => true
-        }
-    }
-}
 
 pub struct PathTree<T>
 {
@@ -85,6 +77,8 @@ impl<T> PathTree<T>
         use PathElement::*;
         if path.is_empty()
         {
+            // add payload at current level
+            self.payloads.push(payload);
             return;
         }
 
@@ -127,14 +121,14 @@ impl<T> PathTree<T>
         return child.add_payload(&path[1..], payload)
     }
 
-    pub fn get_payloads(self: &Self, path: &[PathElement]) -> Vec<&T>
+    pub fn get_payloads<'a, 'b>(self: &'a Self, path: &'b [PathElement]) -> Vec<&'a T>
     {
-        struct Job<'a, T>
+        struct Job<'c, 'd, T>
         {
-            path: &'a [PathElement],
+            path: &'c [PathElement],
             path_wildcard_override: Option<(usize,usize)>,
 
-            tree: &'a PathTree<T>,
+            tree: &'d PathTree<T>,
             tree_wildcard_override: Option<(usize,usize)>,
         }
 
@@ -148,7 +142,7 @@ impl<T> PathTree<T>
         let mut jobs = Vec::new();
         jobs.push(initial_job);
 
-        let mut result = Vec::new();
+        let mut result : Vec<&'a T>= Vec::new();
         'jobloop:
         loop {
             if jobs.is_empty()
@@ -163,28 +157,61 @@ impl<T> PathTree<T>
 
             if path.is_empty()
             {
-                result.extend_from_slice(&tree.payloads[..]);
+            println!("job: tree={:?} path=[]", tree.element);
+                for payload in tree.payloads.iter()
+                {
+                    result.push(payload);
+                }
+                //result.extend_from_slice(&tree.payloads[..]); // does not work, as we pass reference to slice which then causes copy of slice elements
                 continue 'jobloop;
             }
+            println!("job: tree={:?} path={:?}", tree.element, path[0]);
 
             let tree_node = tree.element.clone();
             let path_node = path[0].clone();
             match tree_node
             {
+                Root =>
+                {
+                    if matches!(path_node, Root)
+                    {
+                        for child in self.childs.iter()
+                        {
+                            let job = Job{
+                                path: &path[1..],
+                                path_wildcard_override: None,
+                                tree: child,
+                                tree_wildcard_override: None
+                                };
+                            jobs.push(job);
+                        }
+                    }
+                    else {
+                        // root needs to match with root, otherwise path is malformed and will lead to no results at all.
+                        return Vec::new();
+                    }
+
+                },
                 Name(tree_node_name) =>
                 {
                     match path_node
                     {
+                        Root =>
+                        {
+                            // root needs to match with root, otherwise path is malformed and will lead to no results at all.
+                            return Vec::new();
+                        }
                         // Name + Name
                         Name(path_node_name) =>
                         {
                             // match -> add all childs to job list
                             if tree_node_name == path_node_name
                             {
-                                for child in self.childs.iter()
+                                for child in tree.childs.iter()
                                 {
+                                    println!(" name/name: add child");
                                     let job = Job{
-                                        path: path[1..],
+                                        path: &path[1..],
                                         path_wildcard_override: None,
                                         tree: child,
                                         tree_wildcard_override: None
@@ -207,14 +234,14 @@ impl<T> PathTree<T>
                                 None => path_wildcard
                             };
                             
-                            if path_wildcard.0 == 0 and path_wildcard.1 == 0
+                            if path_wildcard.0 == 0 && path_wildcard.1 == 0
                             {
                                 // invalid wildcard
                                 // remove it and contine
                                 let job = Job{
                                     path: &path[1..], // full path, as WC might not be fully consumed
                                     path_wildcard_override: None,
-                                    tree: &self,
+                                    tree: &tree,
                                     tree_wildcard_override: None
                                     };
                                 jobs.push(job);
@@ -228,7 +255,7 @@ impl<T> PathTree<T>
                                 let job = Job{
                                     path: &path[1..], // full path, as WC might not be fully consumed
                                     path_wildcard_override: None,
-                                    tree: &self,
+                                    tree: &tree,
                                     tree_wildcard_override: None
                                     };
                                 jobs.push(job);
@@ -236,13 +263,13 @@ impl<T> PathTree<T>
 
                             // consuming is always an option:
                             // add all childs after consuming one from the wildcard
-                            for child in self.childs.iter()
+                            for child in tree.childs.iter()
                             {
                                 let mut new_path_wildcard = path_wildcard.clone();
-                                consume_wildcard(new_path_wildcard);
+                                consume_wildcard(&mut new_path_wildcard);
                                 let job = Job{
                                     path: &path[..], // full path, as WC might not be fully consumed
-                                    path_wildcard_override: new_path_wildcard,
+                                    path_wildcard_override: Some(new_path_wildcard),
                                     tree: child,
                                     tree_wildcard_override: None
                                     };
@@ -253,10 +280,6 @@ impl<T> PathTree<T>
                         }
                     }
                 },
-                Root =>
-                {
-
-                },
                 Wildcard(tree_wildcard) => 
                 {
                     // tree node is a wildcard => retrieve and override if required:
@@ -264,18 +287,23 @@ impl<T> PathTree<T>
                     {
                         Some(wc_override) => wc_override,
                         None => tree_wildcard
-                    }
+                    };
 
                     match path_node 
                     {
+                        Root =>
+                        {
+                            // root needs to match with root, otherwise path is malformed and will lead to no results at all.
+                            return Vec::new();
+                        }
                         // tree_node: Wildcard, path_node: Name
                         Name(path_node_name) =>
                         {
-                            if tree_wildcard.0 == 0 and tree_wildcard.1 == 0
+                            if tree_wildcard.0 == 0 && tree_wildcard.1 == 0
                             {
                                 // invalid wildcard
                                 // remove it and contine
-                                for child in self.child.iter()
+                                for child in tree.childs.iter()
                                 {
                                     let job = Job{
                                         path: &path[..], // full path, as WC might not be fully consumed
@@ -291,7 +319,7 @@ impl<T> PathTree<T>
                             // no minumums required, so we might also skip wildcard here:
                             if tree_wildcard.0 == 0
                             {
-                                for child in self.child.iter()
+                                for child in tree.childs.iter()
                                 {
                                     let job = Job{
                                         path: &path[..], // full path, as WC might not be fully consumed
@@ -304,12 +332,12 @@ impl<T> PathTree<T>
                             }
 
                             // consuming is always an option for valid wildcards:
-                            for child in self.childs.iter()
+                            for child in tree.childs.iter()
                             {
                                 let mut new_tree_wildcard = tree_wildcard.clone();
-                                consume_wildcard(&new_tree_wildcard);
+                                consume_wildcard(&mut new_tree_wildcard);
                                 let job = Job{
-                                    path: path[1..],
+                                    path: &path[1..],
                                     path_wildcard_override: None,
                                     tree: child,
                                     tree_wildcard_override: Some(new_tree_wildcard)
@@ -329,11 +357,11 @@ impl<T> PathTree<T>
 
                             // we reduce this scenario down to a set of single wildcard scenarios by recursively removing/consuming from one wildcard:
 
-                            if tree_wildcard.0 == 0 and tree_wildcard.1 == 0
+                            if tree_wildcard.0 == 0 && tree_wildcard.1 == 0
                             {
                                 // invalid tree wildcard
                                 // remove it and contine
-                                for child in self.child.iter()
+                                for child in tree.childs.iter()
                                 {
                                     let job = Job{
                                         path: &path[..], // full path, as WC might not be fully consumed
@@ -346,14 +374,14 @@ impl<T> PathTree<T>
                                 continue 'jobloop;
                             }
 
-                            if path_wildcard.0 == 0 and path_wildcard.1 == 0
+                            if path_wildcard.0 == 0 && path_wildcard.1 == 0
                             {
                                 // invalid path wildcard
                                 // remove it and contine
                                 let job = Job{
                                     path: &path[1..], // full path, as WC might not be fully consumed
                                     path_wildcard_override: None,
-                                    tree: self,
+                                    tree: tree,
                                     tree_wildcard_override: None
                                     };
                                 jobs.push(job);
@@ -364,7 +392,7 @@ impl<T> PathTree<T>
                             // no minumums required, so we might also skip wildcard here:
                             if tree_wildcard.0 == 0
                             {
-                                for child in self.child.iter()
+                                for child in tree.childs.iter()
                                 {
                                     let job = Job{
                                         path: &path[..], // full path, as WC might not be fully consumed
@@ -377,7 +405,7 @@ impl<T> PathTree<T>
                             }
 
                             // consuming is always an option for valid wildcards:
-                            for child in self.childs.iter()
+                            for child in tree.childs.iter()
                             {
                                 let mut new_tree_wildcard = tree_wildcard.clone();
                                 consume_wildcard(&mut new_tree_wildcard);
@@ -517,12 +545,13 @@ fn test_get_payloads()
     let mut tree = PathTree::<&str>::new();
     let path = [Root, Name("test".into())];
     tree.add_payload(&path, "data");
-    assert!(tree.get_payloads(&[Wildcard((1,0)), Wildcard((1,0))]).len() == 1);
-    assert!(tree.get_payloads(&[Wildcard((1,0)), Wildcard((1,0))])[0] == &"data");
-    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 1);
-    assert!(tree.get_payloads(&[Root, Wildcard((1,0))])[0] == &"data");
-    assert!(tree.get_payloads(&path).len() == 1);
-    assert!(tree.get_payloads(&path)[0] == &"data");
+    assert!(tree.get_payloads(&[Root, Name("test".into())]).len() == 1);
+    assert!(tree.get_payloads(&[Root, Name("test".into())])[0] == &"data");
+    assert!(false);
+    //assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 1);
+    //assert!(tree.get_payloads(&[Root, Wildcard((1,0))])[0] == &"data");
+    //assert!(tree.get_payloads(&path).len() == 1);
+    //assert!(tree.get_payloads(&path)[0] == &"data");
 }
 
 #[test]
