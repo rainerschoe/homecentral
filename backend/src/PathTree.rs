@@ -405,7 +405,7 @@ impl<T> PathTree<T>
                                 for child in tree.childs.iter()
                                 {
                                     let job = Job{
-                                        path: &path[..], // full path, as WC might not be fully consumed
+                                        path: &path[1..],
                                         path_wildcard_override: None,
                                         tree: child,
                                         tree_wildcard_override: None,
@@ -416,19 +416,16 @@ impl<T> PathTree<T>
                             }
 
                             // consuming is always an option for valid wildcards:
-                            for child in tree.childs.iter()
-                            {
-                                let mut new_tree_wildcard = tree_wildcard.clone();
-                                consume_wildcard(&mut new_tree_wildcard);
-                                let job = Job{
-                                    path: &path[1..],
-                                    path_wildcard_override: None,
-                                    tree: child,
-                                    tree_wildcard_override: Some(new_tree_wildcard),
-                                    parent_node: Some(&tree)
-                                    };
-                                jobs.push(job);
-                            }
+                            let mut new_tree_wildcard = tree_wildcard.clone();
+                            consume_wildcard(&mut new_tree_wildcard);
+                            let job = Job{
+                                path: &path[1..],
+                                path_wildcard_override: None,
+                                tree: &tree,
+                                tree_wildcard_override: Some(new_tree_wildcard),
+                                parent_node: Some(&tree)
+                                };
+                            jobs.push(job);
                         }
 
                         // tree_node: Wildcard, path_node: Wildcard (the tricky case)
@@ -910,9 +907,8 @@ fn test_wildcard_in_tree()
 
     let results = tree.get_payloads(&[Root, Name("l2".into())]);
     println!("res={:#?}", results);
-    assert!(results.len() == 4);
+    assert!(results.len() == 3);
     assert!(results.contains(&&"s2"));
     assert!(results.contains(&&"s2opt"));
-    assert!(results.contains(&&"severything"));
     assert!(results.contains(&&"severything"));
 }
