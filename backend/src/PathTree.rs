@@ -1,4 +1,7 @@
 //use std::{sync::Arc, iter::TrustedLen};
+use std::collections::HashSet;
+
+use by_address::ByAddress;
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum PathElement
@@ -65,6 +68,7 @@ pub struct PathTree<T>
 //     -> sub1, sub2, sub3, sub4
 // publish /home/*/Schlafzi
 //     -> sub1, sub2, sub5, sub3, sub4
+
 impl<T> PathTree<T>
 {
     pub fn new() -> Self
@@ -123,6 +127,7 @@ impl<T> PathTree<T>
 
     pub fn get_payloads<'a, 'b>(self: &'a Self, path: &'b [PathElement]) -> Vec<&'a T>
     {
+        println!("-----");
         struct Job<'c, 'd, T>
         {
             path: &'c [PathElement],
@@ -130,21 +135,32 @@ impl<T> PathTree<T>
 
             tree: &'d PathTree<T>,
             tree_wildcard_override: Option<(usize,usize)>,
+
+            parent_node: Option<&'d PathTree<T>>,
         }
 
         let initial_job = Job{
                                     path: path,
                                     path_wildcard_override: None,
                                     tree: self,
-                                    tree_wildcard_override: None
+                                    tree_wildcard_override: None,
+                                    parent_node: None
                                     };
 
         let mut jobs = Vec::new();
         jobs.push(initial_job);
 
+        // Hack: rust references do not implement hash and eq traits. this is why I use an additional hashset with the ByAddress crate to check for duplicates. I did not want to expose the ByAddress crate in the user facing APU this is why i need to double maintain the result list here:
+        let mut result_hashmap : HashSet<ByAddress<&T>> = HashSet::new();
         let mut result : Vec<&'a T>= Vec::new();
         'jobloop:
+
         loop {
+
+            // if last joblist size == joblistsize and lastmatchedjobmatched
+            //      -> 
+            // store joblist size
+
             if jobs.is_empty()
             {
                 break 'jobloop;
@@ -157,15 +173,10 @@ impl<T> PathTree<T>
 
             if path.is_empty()
             {
-            println!("job: tree={:?} path=[]", tree.element);
-                for payload in tree.payloads.iter()
-                {
-                    result.push(payload);
-                }
-                //result.extend_from_slice(&tree.payloads[..]); // does not work, as we pass reference to slice which then causes copy of slice elements
+                println!("job: tree={:?}(override: {:?}) path=[] (override: {:?})", tree.element, tree_wildcard_override, path_wildcard_override);
                 continue 'jobloop;
             }
-            println!("job: tree={:?} path={:?}", tree.element, path[0]);
+            println!("job: tree={:?}(override: {:?}) path={:?}(override: {:?})", tree.element, tree_wildcard_override, path[0], path_wildcard_override);
 
             let tree_node = tree.element.clone();
             let path_node = path[0].clone();
@@ -175,13 +186,26 @@ impl<T> PathTree<T>
                 {
                     if matches!(path_node, Root)
                     {
-                        for child in self.childs.iter()
+                        if path.len() == 1
+                        {
+                            // all matched and no more things to do for this path
+                            // collect the reward:
+                            for payload in tree.payloads.iter()
+                            {
+                                if result_hashmap.insert(ByAddress(payload))
+                                {
+                                    result.push(payload);
+                                }
+                            }
+                        }
+                        for child in tree.childs.iter()
                         {
                             let job = Job{
                                 path: &path[1..],
                                 path_wildcard_override: None,
                                 tree: child,
-                                tree_wildcard_override: None
+                                tree_wildcard_override: None,
+                                parent_node: Some(&tree)
                                 };
                             jobs.push(job);
                         }
@@ -207,6 +231,19 @@ impl<T> PathTree<T>
                             // match -> add all childs to job list
                             if tree_node_name == path_node_name
                             {
+                                //if path.len() == 1 && tree.childs.len() == 0
+                                if path.len() == 1
+                                {
+                                    // all matched and no more things to do for this path
+                                    // collect the reward:
+                                    for payload in tree.payloads.iter()
+                                    {
+                                        if result_hashmap.insert(ByAddress(payload))
+                                        {
+                                            result.push(payload);
+                                        }
+                                    }
+                                }
                                 for child in tree.childs.iter()
                                 {
                                     println!(" name/name: add child");
@@ -214,7 +251,8 @@ impl<T> PathTree<T>
                                         path: &path[1..],
                                         path_wildcard_override: None,
                                         tree: child,
-                                        tree_wildcard_override: None
+                                        tree_wildcard_override: None,
+                                        parent_node: Some(&tree)
                                         };
                                     jobs.push(job);
                                 }
@@ -242,7 +280,8 @@ impl<T> PathTree<T>
                                     path: &path[1..], // full path, as WC might not be fully consumed
                                     path_wildcard_override: None,
                                     tree: &tree,
-                                    tree_wildcard_override: None
+                                    tree_wildcard_override: None,
+                                    parent_node: job.parent_node
                                     };
                                 jobs.push(job);
                                 continue 'jobloop;
@@ -251,16 +290,45 @@ impl<T> PathTree<T>
                             // When minimums is 0, we also have the choice to NOT consume and skip the wildcard
                             if path_wildcard.0 == 0
                             {
+                                if let Some(parent) = job.parent_node
+                                {
+                                    if path.len() == 1
+                                    {
+                                        // wildcard skipped and it was last in path
+                                        // -> no need to check nodes at this level, parent already is a match, add its payload:
+                                        for payload in parent.payloads.iter()
+                                        {
+                                            if result_hashmap.insert(ByAddress(payload))
+                                            {
+                                                result.push(payload);
+                                            }
+                                        }
+                                    }
+                                }
                                 // remove it
                                 let job = Job{
                                     path: &path[1..], // full path, as WC might not be fully consumed
                                     path_wildcard_override: None,
                                     tree: &tree,
-                                    tree_wildcard_override: None
+                                    tree_wildcard_override: None,
+                                    parent_node: job.parent_node
                                     };
                                 jobs.push(job);
+
                             }
 
+                            if path.len() == 1 && path_wildcard.0 <= 1
+                            {
+                                // all matched and no more things to do for this path
+                                // collect the reward:
+                                for payload in tree.payloads.iter()
+                                {
+                                    if result_hashmap.insert(ByAddress(payload))
+                                    {
+                                        result.push(payload);
+                                    }
+                                }
+                            }
                             // consuming is always an option:
                             // add all childs after consuming one from the wildcard
                             for child in tree.childs.iter()
@@ -271,7 +339,8 @@ impl<T> PathTree<T>
                                     path: &path[..], // full path, as WC might not be fully consumed
                                     path_wildcard_override: Some(new_path_wildcard),
                                     tree: child,
-                                    tree_wildcard_override: None
+                                    tree_wildcard_override: None,
+                                    parent_node: Some(&tree)
                                     };
                                 jobs.push(job);
                             }
@@ -299,6 +368,19 @@ impl<T> PathTree<T>
                         // tree_node: Wildcard, path_node: Name
                         Name(path_node_name) =>
                         {
+                            if path.len() == 1 
+                            {
+                                // all matched and no more things to do for this path
+                                // collect the reward:
+                                for payload in tree.payloads.iter()
+                                {
+                                    if result_hashmap.insert(ByAddress(payload))
+                                    {
+                                        result.push(payload);
+                                    }
+                                }
+                                continue 'jobloop;
+                            }
                             if tree_wildcard.0 == 0 && tree_wildcard.1 == 0
                             {
                                 // invalid wildcard
@@ -309,7 +391,8 @@ impl<T> PathTree<T>
                                         path: &path[..], // full path, as WC might not be fully consumed
                                         path_wildcard_override: None,
                                         tree: child,
-                                        tree_wildcard_override: None
+                                        tree_wildcard_override: None,
+                                        parent_node: Some(&tree)
                                         };
                                     jobs.push(job);
                                 }
@@ -325,7 +408,8 @@ impl<T> PathTree<T>
                                         path: &path[..], // full path, as WC might not be fully consumed
                                         path_wildcard_override: None,
                                         tree: child,
-                                        tree_wildcard_override: None
+                                        tree_wildcard_override: None,
+                                        parent_node: Some(&tree)
                                         };
                                     jobs.push(job);
                                 }
@@ -340,7 +424,8 @@ impl<T> PathTree<T>
                                     path: &path[1..],
                                     path_wildcard_override: None,
                                     tree: child,
-                                    tree_wildcard_override: Some(new_tree_wildcard)
+                                    tree_wildcard_override: Some(new_tree_wildcard),
+                                    parent_node: Some(&tree)
                                     };
                                 jobs.push(job);
                             }
@@ -367,7 +452,8 @@ impl<T> PathTree<T>
                                         path: &path[..], // full path, as WC might not be fully consumed
                                         path_wildcard_override: None,
                                         tree: child,
-                                        tree_wildcard_override: None
+                                        tree_wildcard_override: None,
+                                        parent_node: Some(&tree)
                                         };
                                     jobs.push(job);
                                 }
@@ -382,7 +468,8 @@ impl<T> PathTree<T>
                                     path: &path[1..], // full path, as WC might not be fully consumed
                                     path_wildcard_override: None,
                                     tree: tree,
-                                    tree_wildcard_override: None
+                                    tree_wildcard_override: None,
+                                    parent_node: job.parent_node
                                     };
                                 jobs.push(job);
                                 continue 'jobloop;
@@ -398,7 +485,8 @@ impl<T> PathTree<T>
                                         path: &path[..], // full path, as WC might not be fully consumed
                                         path_wildcard_override: job.path_wildcard_override,
                                         tree: child,
-                                        tree_wildcard_override: None
+                                        tree_wildcard_override: None,
+                                        parent_node: Some(&tree)
                                         };
                                     jobs.push(job);
                                 }
@@ -416,7 +504,8 @@ impl<T> PathTree<T>
                                     path: &path[..],
                                     path_wildcard_override: Some(new_path_wildcard),
                                     tree: child,
-                                    tree_wildcard_override: Some(new_tree_wildcard)
+                                    tree_wildcard_override: Some(new_tree_wildcard),
+                                    parent_node: Some(&tree)
                                     };
                                 jobs.push(job);
                             }
@@ -433,7 +522,7 @@ impl<T> PathTree<T>
 }
 
 #[test]
-#[ignore = "tofireasonx"]
+//#[ignore = "tofireasonx"]
 fn test_add_payload_to_root()
 {
     use PathElement::*;
@@ -546,10 +635,9 @@ fn test_get_payloads()
     let path = [Root, Name("test".into())];
     tree.add_payload(&path, "data");
     assert!(tree.get_payloads(&[Root, Name("test".into())]).len() == 1);
-    assert!(tree.get_payloads(&[Root, Name("test".into())])[0] == &"data");
-    assert!(false);
-    //assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 1);
-    //assert!(tree.get_payloads(&[Root, Wildcard((1,0))])[0] == &"data");
+    assert!(tree.get_payloads(&[Root, Name("test".into())]).contains(&&"data"));
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 1);
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).contains(&&"data"));
     //assert!(tree.get_payloads(&path).len() == 1);
     //assert!(tree.get_payloads(&path)[0] == &"data");
 }
@@ -563,10 +651,10 @@ fn test_get_payloads_relative_path()
     tree.add_payload(&path, "data");
     assert!(tree.childs.len() == 1);
     assert!(tree.childs[0].get_payloads(&[Wildcard((1,0)), Wildcard((1,0))]).len() == 1);
-    assert!(tree.childs[0].get_payloads(&[Wildcard((1,0)), Wildcard((1,0))])[0] == &"data");
+    assert!(tree.childs[0].get_payloads(&[Wildcard((1,0)), Wildcard((1,0))]).contains(&&"data"));
     assert!(tree.childs[0].childs.len() == 1);
     assert!(tree.childs[0].childs[0].get_payloads(&[Wildcard((1,0))]).len() == 1);
-    assert!(tree.childs[0].childs[0].get_payloads(&[Wildcard((1,0))])[0] == &"data");
+    assert!(tree.childs[0].childs[0].get_payloads(&[Wildcard((1,0))]).contains(&&"data"));
     assert!(tree.childs[0].get_payloads(&path).len() == 0);
 }
 
@@ -578,13 +666,13 @@ fn test_get_2payloads_same_path()
     let path = [Root, Name("test".into())];
     tree.add_payload(&path, "data");
     tree.add_payload(&path, "data2");
-    assert!(tree.get_payloads(&[Wildcard((1,0)), Wildcard((1,0))]).len() == 2);
-    assert!(tree.get_payloads(&[Wildcard((1,0)), Wildcard((1,0))])[0] == &"data");
     assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 2);
-    assert!(tree.get_payloads(&[Root, Wildcard((1,0))])[1] == &"data2");
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).contains(&&"data"));
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 2);
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).contains(&&"data2"));
     assert!(tree.get_payloads(&path).len() == 2);
-    assert!(tree.get_payloads(&path)[0] == &"data");
-    assert!(tree.get_payloads(&path)[1] == &"data2");
+    assert!(tree.get_payloads(&path).contains(&&"data"));
+    assert!(tree.get_payloads(&path).contains(&&"data2"));
 }
 
 #[test]
@@ -598,12 +686,12 @@ fn test_get_2payload_different_path()
     tree.add_payload(&path2, "data2");
     assert!(tree.get_payloads(&[Root]).len() == 0);
     assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 2);
-    assert!(tree.get_payloads(&[Root, Wildcard((1,0))])[0] == &"data");
-    assert!(tree.get_payloads(&[Root, Wildcard((1,0))])[1] == &"data2");
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).contains(&&"data"));
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).contains(&&"data2"));
     assert!(tree.get_payloads(&path1).len() == 1);
     assert!(tree.get_payloads(&path2).len() == 1);
-    assert!(tree.get_payloads(&path1)[0] == &"data");
-    assert!(tree.get_payloads(&path2)[0] == &"data2");
+    assert!(tree.get_payloads(&path1).contains(&&"data"));
+    assert!(tree.get_payloads(&path2).contains(&&"data2"));
 }
 
 #[test]
@@ -618,13 +706,213 @@ fn test_get_2path_different_deep_path()
     assert!(tree.get_payloads(&[Root]).len() == 0);
     assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 0);
     assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Name("l12".into())]).len() == 1);
-    assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Name("l12".into())])[0] == &"data1");
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Name("l12".into())]).contains(&&"data1"));
     assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Wildcard((1,0))]).len() == 2);
-    assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Wildcard((1,0))])[0] == &"data1");
-    assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Wildcard((1,0))])[1] == &"data2");
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Wildcard((1,0))]).contains(&&"data1"));
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Wildcard((1,0))]).contains(&&"data2"));
 
     assert!(tree.get_payloads(&path1).len() == 1);
     assert!(tree.get_payloads(&path2).len() == 1);
-    assert!(tree.get_payloads(&path1)[0] == &"data1");
-    assert!(tree.get_payloads(&path2)[0] == &"data2");
+    assert!(tree.get_payloads(&path1).contains(&&"data1"));
+    assert!(tree.get_payloads(&path2).contains(&&"data2"));
+}
+
+#[test]
+fn test_wildcard_at_end_of_path()
+{
+    // roota        sroot
+    //    l1        s1
+    //      l11     s11
+    //      l12     s12
+    //    l2        s2
+    //      l21     s21
+    //      l22     s22
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&[Root], "sroot");
+    tree.add_payload(&[Root, Name("l1".into())], "s1");
+    tree.add_payload(&[Root, Name("l1".into()), Name("l11".into())], "s11");
+    tree.add_payload(&[Root, Name("l1".into()), Name("l12".into())], "s12");
+    tree.add_payload(&[Root, Name("l2".into())], "s2");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l21".into())], "s21");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l22".into())], "s22");
+
+    assert!(tree.get_payloads(&[Root]).len() == 1);
+    assert!(tree.get_payloads(&[Root]).contains(&&"sroot"));
+
+    assert!(tree.get_payloads(&[Root, Name("l1".into())]).len() == 1);
+    assert!(tree.get_payloads(&[Root, Name("l1".into())]).contains(&&"s1"));
+
+    assert!(tree.get_payloads(&[Root, Name("l1".into()), Name("l11".into())]).len() == 1);
+    assert!(tree.get_payloads(&[Root, Name("l1".into()), Name("l11".into())]).contains(&&"s11"));
+
+    assert!(tree.get_payloads(&[Root, Name("l1".into()), Name("l12".into())]).len() == 1);
+    assert!(tree.get_payloads(&[Root, Name("l1".into()), Name("l12".into())]).contains(&&"s12"));
+
+    assert!(tree.get_payloads(&[Root, Name("l2".into())]).len() == 1);
+    assert!(tree.get_payloads(&[Root, Name("l2".into())]).contains(&&"s2"));
+
+    assert!(tree.get_payloads(&[Root, Name("l2".into()), Name("l21".into())]).len() == 1);
+    assert!(tree.get_payloads(&[Root, Name("l2".into()), Name("l21".into())]).contains(&&"s21"));
+
+    assert!(tree.get_payloads(&[Root, Name("l2".into()), Name("l22".into())]).len() == 1);
+    assert!(tree.get_payloads(&[Root, Name("l2".into()), Name("l22".into())]).contains(&&"s22"));
+
+    assert!(tree.get_payloads(&[Root, Name("l2".into()), Wildcard((1,0))]).len() == 2);
+    assert!(tree.get_payloads(&[Root, Name("l2".into()), Wildcard((1,0))]).contains(&&"s21"));
+    assert!(tree.get_payloads(&[Root, Name("l2".into()), Wildcard((1,0))]).contains(&&"s22"));
+
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 2);
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).contains(&&"s1"));
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).contains(&&"s2"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((0,1))]);
+    assert!(results.len() == 3);
+    assert!(results.contains(&&"s1"));
+    assert!(results.contains(&&"s2"));
+    assert!(results.contains(&&"sroot"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((0,2))]);
+    println!("res={:#?}", results);
+    assert!(results.len() == 7);
+    assert!(results.contains(&&"s1"));
+    assert!(results.contains(&&"s11"));
+    assert!(results.contains(&&"s12"));
+    assert!(results.contains(&&"s2"));
+    assert!(results.contains(&&"s21"));
+    assert!(results.contains(&&"s22"));
+    assert!(results.contains(&&"sroot"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((1,1))]);
+    println!("res={:#?}", results);
+    assert!(results.len() == 6);
+    assert!(results.contains(&&"s1"));
+    assert!(results.contains(&&"s11"));
+    assert!(results.contains(&&"s12"));
+    assert!(results.contains(&&"s2"));
+    assert!(results.contains(&&"s21"));
+    assert!(results.contains(&&"s22"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((2,0))]);
+    println!("res={:#?}", results);
+    assert!(results.len() == 4);
+    assert!(results.contains(&&"s11"));
+    assert!(results.contains(&&"s12"));
+    assert!(results.contains(&&"s21"));
+    assert!(results.contains(&&"s22"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((3,0))]);
+    println!("res={:#?}", results);
+    assert!(results.len() == 0);
+}
+
+#[test]
+fn test_wildcard_in_middle()
+{
+    // roota        sroot
+    //    l1        s1
+    //      same    s1same
+    //      l12     s12
+    //    l2        s2
+    //      l21     s21
+    //      l22     s22
+    //      same    s2same
+    //    same      srootsame
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&[Root], "sroot");
+    tree.add_payload(&[Root, Name("same".into())], "srootsame");
+    tree.add_payload(&[Root, Name("l1".into())], "s1");
+    tree.add_payload(&[Root, Name("l1".into()), Name("same".into())], "s1same");
+    tree.add_payload(&[Root, Name("l1".into()), Name("l12".into())], "s12");
+    tree.add_payload(&[Root, Name("l2".into())], "s2");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l21".into())], "s21");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l22".into())], "s22");
+    tree.add_payload(&[Root, Name("l2".into()), Name("same".into())], "s2same");
+
+    let results = tree.get_payloads(&[Root, Wildcard((1,0)), Name("same".into())]);
+    println!("res={:#?}", results);
+    assert!(results.len() == 2);
+    assert!(results.contains(&&"s1same"));
+    assert!(results.contains(&&"s2same"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((0,1)), Name("same".into())]);
+    println!("res={:#?}", results);
+    assert!(results.len() == 3);
+    assert!(results.contains(&&"s1same"));
+    assert!(results.contains(&&"s2same"));
+    assert!(results.contains(&&"srootsame"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((1,1)), Name("same".into())]);
+    println!("res={:#?}", results);
+    assert!(results.len() == 2);
+    assert!(results.contains(&&"s1same"));
+    assert!(results.contains(&&"s2same"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((0,10)), Name("same".into())]);
+    println!("res={:#?}", results);
+    assert!(results.len() == 3);
+    assert!(results.contains(&&"s1same"));
+    assert!(results.contains(&&"s2same"));
+    assert!(results.contains(&&"srootsame"));
+}
+
+#[test]
+fn test_wildcard_in_tree()
+{
+    // roota        sroot
+    //    l1        s1
+    //      l11     s11
+    //    l2        s2
+    //      l21     s21
+    //      light   s2light
+    //      l22     s22
+    //      *1,0    s2x
+    //      *0,1    s2opt
+    //    *0,100    severyting
+    //      light   sanyLight
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&[Root], "sroot");
+    tree.add_payload(&[Root, Name("same".into())], "srootsame");
+    tree.add_payload(&[Root, Wildcard((0,100))], "severything");
+    tree.add_payload(&[Root, Wildcard((0,100)), Name("light".into())], "sanyLight");
+    tree.add_payload(&[Root, Name("l1".into())], "s1");
+    tree.add_payload(&[Root, Name("l1".into()), Name("l11".into())], "s11");
+    tree.add_payload(&[Root, Name("l2".into())], "s2");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l21".into())], "s21");
+    tree.add_payload(&[Root, Name("l2".into()), Name("light".into())], "s2light");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l22".into())], "s22");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l22".into())], "s22");
+    tree.add_payload(&[Root, Name("l2".into()), Wildcard((1,0))], "s2x");
+    tree.add_payload(&[Root, Name("l2".into()), Wildcard((0,1))], "s2opt");
+
+    let results = tree.get_payloads(&[Root, Name("l1".into())]);
+    println!("res={:#?}", results);
+    assert!(results.len() == 2);
+    assert!(results.contains(&&"s1"));
+    assert!(results.contains(&&"severything"));
+
+    let results = tree.get_payloads(&[Root, Name("l2".into()), Name("light".into())]);
+    println!("res={:#?}", results);
+    assert!(results.len() == 5);
+    assert!(results.contains(&&"s2opt"));
+    assert!(results.contains(&&"s2x"));
+    assert!(results.contains(&&"s2light"));
+    assert!(results.contains(&&"sanyLight"));
+    assert!(results.contains(&&"severything"));
+
+    let results = tree.get_payloads(&[Root, Name("l1".into()), Name("light".into())]);
+    println!("res={:#?}", results);
+    assert!(results.len() == 2);
+    assert!(results.contains(&&"sanyLight"));
+    assert!(results.contains(&&"severything"));
+
+    let results = tree.get_payloads(&[Root, Name("l2".into())]);
+    println!("res={:#?}", results);
+    assert!(results.len() == 4);
+    assert!(results.contains(&&"s2"));
+    assert!(results.contains(&&"s2opt"));
+    assert!(results.contains(&&"severything"));
+    assert!(results.contains(&&"severything"));
 }

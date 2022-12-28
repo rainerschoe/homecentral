@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros"] }
+by_address = {version = "1"}
