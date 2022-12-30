@@ -171,20 +171,16 @@ impl<T> PathTree<T>
             let tree_wildcard_override = job.tree_wildcard_override;
             let path_wildcard_override = job.path_wildcard_override;
 
-            if path.is_empty()
-            {
-                println!("job: tree={:?}(override: {:?}) path=[] (override: {:?})", tree.element, tree_wildcard_override, path_wildcard_override);
-                continue 'jobloop;
-            }
-            println!("job: tree={:?}(override: {:?}) path={:?}(override: {:?})", tree.element, tree_wildcard_override, path[0], path_wildcard_override);
+            println!("job: tree={:?}(override: {:?}) path={:?}(override: {:?})", tree.element, tree_wildcard_override, path.get(0), path_wildcard_override);
 
-            let tree_node = tree.element.clone();
-            let path_node = path[0].clone();
+            let tree_node = &tree.element;
+            //let path_node = &path[0];
+            let path_node = path.get(0);
             match tree_node
             {
                 Root =>
                 {
-                    if matches!(path_node, Root)
+                    if matches!(path_node, Some(Root))
                     {
                         if path.len() == 1
                         {
@@ -220,13 +216,17 @@ impl<T> PathTree<T>
                 {
                     match path_node
                     {
-                        Root =>
+                        Some(Root) =>
                         {
                             // root needs to match with root, otherwise path is malformed and will lead to no results at all.
                             return Vec::new();
                         }
+                        None =>
+                        {
+                            // tree expects name, but path is empty -> no matches, nothing to do
+                        }
                         // Name + Name
-                        Name(path_node_name) =>
+                        Some(Name(path_node_name)) =>
                         {
                             // match -> add all childs to job list
                             if tree_node_name == path_node_name
@@ -264,12 +264,12 @@ impl<T> PathTree<T>
                             }
                         },
                         // tree:Name + path:Wildcard
-                        Wildcard(path_wildcard) =>
+                        Some(Wildcard(path_wildcard)) =>
                         {
                             let mut path_wildcard = match job.path_wildcard_override
                             {
                                 Some(wc_override) => wc_override,
-                                None => path_wildcard
+                                None => path_wildcard.clone()
                             };
                             
                             if path_wildcard.0 == 0 && path_wildcard.1 == 0
@@ -344,8 +344,6 @@ impl<T> PathTree<T>
                                     };
                                 jobs.push(job);
                             }
-
-                            
                         }
                     }
                 },
@@ -355,18 +353,33 @@ impl<T> PathTree<T>
                     let mut tree_wildcard = match job.tree_wildcard_override
                     {
                         Some(wc_override) => wc_override,
-                        None => tree_wildcard
+                        None => tree_wildcard.clone()
                     };
 
                     match path_node 
                     {
-                        Root =>
+                        Some(Root) =>
                         {
                             // root needs to match with root, otherwise path is malformed and will lead to no results at all.
                             return Vec::new();
                         }
+                        None =>
+                        {
+                            if(tree_wildcard.0 == 0)
+                            {
+                                // wildcard is optional and may be skipped
+                                // -> we have a match! add payload:
+                                for payload in tree.payloads.iter()
+                                {
+                                    if result_hashmap.insert(ByAddress(payload))
+                                    {
+                                        result.push(payload);
+                                    }
+                                }
+                            }
+                        }
                         // tree_node: Wildcard, path_node: Name
-                        Name(path_node_name) =>
+                        Some(Name(path_node_name)) =>
                         {
                             if path.len() == 1 
                             {
@@ -429,12 +442,12 @@ impl<T> PathTree<T>
                         }
 
                         // tree_node: Wildcard, path_node: Wildcard (the tricky case)
-                        Wildcard(path_wildcard) =>
+                        Some(Wildcard(path_wildcard)) =>
                         {
                             let mut path_wildcard = match job.path_wildcard_override
                             {
                                 Some(wc_override) => wc_override,
-                                None => path_wildcard
+                                None => path_wildcard.clone()
                             };
 
                             // we reduce this scenario down to a set of single wildcard scenarios by recursively removing/consuming from one wildcard:
