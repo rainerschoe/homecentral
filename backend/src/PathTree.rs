@@ -257,11 +257,6 @@ impl<T> PathTree<T>
                                     jobs.push(job);
                                 }
                             }
-                            else
-                            {
-                                // no match -> ignore this arm
-                                continue 'jobloop;
-                            }
                         },
                         // tree:Name + path:Wildcard
                         Some(Wildcard(path_wildcard)) =>
