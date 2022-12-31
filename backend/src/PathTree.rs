@@ -69,13 +69,27 @@ pub struct PathTree<T>
 // publish /home/*/Schlafzi
 //     -> sub1, sub2, sub5, sub3, sub4
 
-impl<T> PathTree<T>
+impl<T : std::fmt::Debug> PathTree<T>
 {
     pub fn new() -> Self
     {
         use PathElement::*;
         PathTree{element: Root, payloads: Vec::new(), childs: Vec::new()}
     }
+
+    fn collect_results<'a>(hashset : &mut HashSet<ByAddress<&'a T>>, results : &mut Vec<&'a T>, payloads: &'a Vec<T>)
+    {
+
+        for payload in payloads.iter()
+        {
+            if hashset.insert(ByAddress(&payload))
+            {
+                println!("  -> add {:?}", payload);
+                results.push(payload);
+            }
+        }
+    }
+
     pub fn add_payload(self: &mut Self, path: &[PathElement], payload: T)
     {
         use PathElement::*;
@@ -151,6 +165,7 @@ impl<T> PathTree<T>
         jobs.push(initial_job);
 
         // Hack: rust references do not implement hash and eq traits. this is why I use an additional hashset with the ByAddress crate to check for duplicates. I did not want to expose the ByAddress crate in the user facing APU this is why i need to double maintain the result list here:
+        //let mut result_hashmap : HashSet<usize> = HashSet::new();
         let mut result_hashmap : HashSet<ByAddress<&T>> = HashSet::new();
         let mut result : Vec<&'a T>= Vec::new();
         'jobloop:
@@ -186,13 +201,7 @@ impl<T> PathTree<T>
                         {
                             // all matched and no more things to do for this path
                             // collect the reward:
-                            for payload in tree.payloads.iter()
-                            {
-                                if result_hashmap.insert(ByAddress(payload))
-                                {
-                                    result.push(payload);
-                                }
-                            }
+                            Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
                         }
                         for child in tree.childs.iter()
                         {
@@ -236,13 +245,7 @@ impl<T> PathTree<T>
                                 {
                                     // all matched and no more things to do for this path
                                     // collect the reward:
-                                    for payload in tree.payloads.iter()
-                                    {
-                                        if result_hashmap.insert(ByAddress(payload))
-                                        {
-                                            result.push(payload);
-                                        }
-                                    }
+                                    Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
                                 }
                                 for child in tree.childs.iter()
                                 {
@@ -289,15 +292,11 @@ impl<T> PathTree<T>
                                 {
                                     if path.len() == 1
                                     {
+                                        println!("b");
                                         // wildcard skipped and it was last in path
                                         // -> no need to check nodes at this level, parent already is a match, add its payload:
-                                        for payload in parent.payloads.iter()
-                                        {
-                                            if result_hashmap.insert(ByAddress(payload))
-                                            {
-                                                result.push(payload);
-                                            }
-                                        }
+                                        Self::collect_results(&mut result_hashmap, &mut result, & parent.payloads);
+                                        println!("b!");
                                     }
                                 }
                                 // remove it
@@ -314,15 +313,11 @@ impl<T> PathTree<T>
 
                             if path.len() == 1 && path_wildcard.0 <= 1
                             {
+                                println!("a");
                                 // all matched and no more things to do for this path
                                 // collect the reward:
-                                for payload in tree.payloads.iter()
-                                {
-                                    if result_hashmap.insert(ByAddress(payload))
-                                    {
-                                        result.push(payload);
-                                    }
-                                }
+                                Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
+                                println!("a!");
                             }
                             // consuming is always an option:
                             // add all childs after consuming one from the wildcard
@@ -364,13 +359,7 @@ impl<T> PathTree<T>
                             {
                                 // wildcard is optional and may be skipped
                                 // -> we have a match! add payload:
-                                for payload in tree.payloads.iter()
-                                {
-                                    if result_hashmap.insert(ByAddress(payload))
-                                    {
-                                        result.push(payload);
-                                    }
-                                }
+                                Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
                             }
                         }
                         // tree_node: Wildcard, path_node: Name
@@ -380,13 +369,7 @@ impl<T> PathTree<T>
                             {
                                 // all matched and no more things to do for this path
                                 // collect the reward:
-                                for payload in tree.payloads.iter()
-                                {
-                                    if result_hashmap.insert(ByAddress(payload))
-                                    {
-                                        result.push(payload);
-                                    }
-                                }
+                                Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
                                 continue 'jobloop;
                             }
                             if tree_wildcard.0 == 0 && tree_wildcard.1 == 0
@@ -439,6 +422,13 @@ impl<T> PathTree<T>
                         // tree_node: Wildcard, path_node: Wildcard (the tricky case)
                         Some(Wildcard(path_wildcard)) =>
                         {
+                            if path.len() == 1 // FIXME: path could be wildcard
+                            {
+                                // all matched and no more things to do for this path
+                                // collect the reward:
+                                Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
+                                //continue 'jobloop;
+                            }
                             let mut path_wildcard = match job.path_wildcard_override
                             {
                                 Some(wc_override) => wc_override,
@@ -772,6 +762,7 @@ fn test_wildcard_at_end_of_path()
     assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).contains(&&"s2"));
 
     let results = tree.get_payloads(&[Root, Wildcard((0,1))]);
+    println!("res={:#?}", results);
     assert!(results.len() == 3);
     assert!(results.contains(&&"s1"));
     assert!(results.contains(&&"s2"));
@@ -919,4 +910,80 @@ fn test_wildcard_in_tree()
     assert!(results.contains(&&"s2"));
     assert!(results.contains(&&"s2opt"));
     assert!(results.contains(&&"severything"));
+}
+
+//#[ignore]
+#[test]
+fn test_wildcard_in_tree_and_path()
+{
+    // roota        sroot
+    //    l1        s1
+    //      l11     s11
+    //    l2        s2
+    //      l21     s21
+    //      light   s2light
+    //      l22     s22
+    //      *1,0    s2x
+    //      *0,1    s2opt
+    //    *0,100    severyting
+    //      light   sanyLight
+    //    same      srootsame
+
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&[Root], "sroot");
+    tree.add_payload(&[Root, Name("same".into())], "srootsame");
+    tree.add_payload(&[Root, Wildcard((0,100))], "severything");
+    tree.add_payload(&[Root, Wildcard((0,100)), Name("light".into())], "sanyLight");
+    tree.add_payload(&[Root, Name("l1".into())], "s1");
+    tree.add_payload(&[Root, Name("l1".into()), Name("l11".into())], "s11");
+    tree.add_payload(&[Root, Name("l2".into())], "s2");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l21".into())], "s21");
+    tree.add_payload(&[Root, Name("l2".into()), Name("light".into())], "s2light");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l22".into())], "s22");
+    tree.add_payload(&[Root, Name("l2".into()), Wildcard((1,0))], "s2x");
+    tree.add_payload(&[Root, Name("l2".into()), Wildcard((0,1))], "s2opt");
+
+    let results = tree.get_payloads(&[Root, Wildcard((0,10))]);
+    println!("res={:#?}", results);
+    assert!(results.len() == 12);
+    assert!(results.contains(&&"s1"));
+    assert!(results.contains(&&"s11"));
+    assert!(results.contains(&&"s2"));
+    assert!(results.contains(&&"s21"));
+    assert!(results.contains(&&"s2light"));
+    assert!(results.contains(&&"s22"));
+    assert!(results.contains(&&"s2x"));
+    assert!(results.contains(&&"s2opt"));
+    assert!(results.contains(&&"sanyLight"));
+    assert!(results.contains(&&"severything"));
+    assert!(results.contains(&&"sroot"));
+    assert!(results.contains(&&"srootsame"));
+
+}
+
+#[test]
+fn hash_address_comparison()
+{
+    let mut v = Vec::new();
+    v.push("asd");
+
+    let mut hashset : HashSet<ByAddress<&&str>> = HashSet::new();
+
+    assert!(ByAddress(v[0]) == ByAddress(&"asd"));
+
+    for i in v.iter()
+    {
+        assert!(hashset.insert(ByAddress(i)) == true);
+    }
+
+    for i in v.iter()
+    {
+        assert!(hashset.insert(ByAddress(i)) == false);
+    }
+
+    //assert!(hashset.insert(ByAddress(v[0])) == true);
+    //assert!(hashset.insert(ByAddress(v[0])) == false);
+    //assert!(hashset.insert(ByAddress(&"asd")) == false);
+    //assert!(hashset.insert(ByAddress(&"asdf")) == true);
 }
