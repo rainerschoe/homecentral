@@ -186,7 +186,7 @@ impl<T : std::fmt::Debug> PathTree<T>
             let tree_wildcard_override = job.tree_wildcard_override;
             let path_wildcard_override = job.path_wildcard_override;
 
-            println!("job: tree={:?}(override: {:?}) path={:?}(override: {:?})", tree.element, tree_wildcard_override, path.get(0), path_wildcard_override);
+            println!("job: tree={:?}(override: {:?}) path={:?}(override: {:?})", tree.element, tree_wildcard_override, path, path_wildcard_override);
 
             let tree_node = &tree.element;
             //let path_node = &path[0];
@@ -422,12 +422,16 @@ impl<T : std::fmt::Debug> PathTree<T>
                         // tree_node: Wildcard, path_node: Wildcard (the tricky case)
                         Some(Wildcard(path_wildcard)) =>
                         {
-                            if path.len() == 1 // FIXME: path could be wildcard
+                            if path.len() == 1
                             {
                                 // all matched and no more things to do for this path
                                 // collect the reward:
                                 Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
-                                //continue 'jobloop;
+
+                                // NOTE: path could is wildcard, still need to traverse deeper
+
+                                // TODO: this might be quite inefficient as we might recurse over big wildcards (imaging two 2^64 wildcards fighting)
+                                // need to somehow detect use-less wildcard permutations
                             }
                             let mut path_wildcard = match job.path_wildcard_override
                             {
@@ -488,22 +492,19 @@ impl<T : std::fmt::Debug> PathTree<T>
                             }
 
                             // consuming is always an option for valid wildcards:
-                            for child in tree.childs.iter()
-                            {
-                                let mut new_tree_wildcard = tree_wildcard.clone();
-                                consume_wildcard(&mut new_tree_wildcard);
+                            let mut new_tree_wildcard = tree_wildcard.clone();
+                            consume_wildcard(&mut new_tree_wildcard);
 
-                                let mut new_path_wildcard = path_wildcard.clone();
-                                consume_wildcard(&mut new_path_wildcard);
-                                let job = Job{
-                                    path: &path[..],
-                                    path_wildcard_override: Some(new_path_wildcard),
-                                    tree: child,
-                                    tree_wildcard_override: Some(new_tree_wildcard),
-                                    parent_node: Some(&tree)
-                                    };
-                                jobs.push(job);
-                            }
+                            let mut new_path_wildcard = path_wildcard.clone();
+                            consume_wildcard(&mut new_path_wildcard);
+                            let job = Job{
+                                path: &path[..],
+                                path_wildcard_override: Some(new_path_wildcard),
+                                tree: tree,
+                                tree_wildcard_override: Some(new_tree_wildcard),
+                                parent_node: Some(&tree)
+                                };
+                            jobs.push(job);
                         }
                     }
 
@@ -960,30 +961,10 @@ fn test_wildcard_in_tree_and_path()
     assert!(results.contains(&&"sroot"));
     assert!(results.contains(&&"srootsame"));
 
-}
-
-#[test]
-fn hash_address_comparison()
-{
-    let mut v = Vec::new();
-    v.push("asd");
-
-    let mut hashset : HashSet<ByAddress<&&str>> = HashSet::new();
-
-    assert!(ByAddress(v[0]) == ByAddress(&"asd"));
-
-    for i in v.iter()
-    {
-        assert!(hashset.insert(ByAddress(i)) == true);
-    }
-
-    for i in v.iter()
-    {
-        assert!(hashset.insert(ByAddress(i)) == false);
-    }
-
-    //assert!(hashset.insert(ByAddress(v[0])) == true);
-    //assert!(hashset.insert(ByAddress(v[0])) == false);
-    //assert!(hashset.insert(ByAddress(&"asd")) == false);
-    //assert!(hashset.insert(ByAddress(&"asdf")) == true);
+    let results = tree.get_payloads(&[Root, Wildcard((0,10)), Name("light".into())]);
+    println!("res={:#?}", results);
+    assert!(results.len() == 3);
+    assert!(results.contains(&&"severything"));
+    assert!(results.contains(&&"sanyLight"));
+    assert!(results.contains(&&"s2light"));
 }
