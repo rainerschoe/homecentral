@@ -2,11 +2,11 @@ use std::any::TypeId;
 use std::any::Any;
 use std::collections::HashMap;
 
-pub mod PathTree;
+pub mod path_tree;
 
 struct DataLake 
 {
-    subscriptions: HashMap<TypeId, PathTree::PathTree<Subscriber>>,
+    subscriptions: HashMap<TypeId, path_tree::PathTree<Subscriber>>,
 }
 
 #[derive(Debug)]
@@ -32,11 +32,11 @@ impl DataLake
     <
     T : 'static /* for TypeId */ + Clone /* for sending to multi subscribers */ + std::fmt::Debug /* for tokio mpsc */
     >
-    (self: &mut Self, path: &[PathTree::PathElement], object: T)
+    (self: &mut Self, path: &[path_tree::PathElement], object: T)
     {
         let type_id = TypeId::of::<T>();
         let boxed_object = Box::new(object);
-        let possible_subscribers = self.subscriptions.entry(type_id).or_insert(PathTree::PathTree::<Subscriber>::new()); // FIXME: should not insert here!
+        let possible_subscribers = self.subscriptions.entry(type_id).or_insert(path_tree::PathTree::<Subscriber>::new()); // FIXME: should not insert here!
 
         for subscriber in
         possible_subscribers.get_payloads(path)
@@ -50,7 +50,7 @@ impl DataLake
         }
     }
 
-    fn subscribe<T: 'static>(self: &mut Self, path: &[PathTree::PathElement]) -> Fisher<T>
+    fn subscribe<T: 'static>(self: &mut Self, path: &[path_tree::PathElement]) -> Fisher<T>
     {
         let type_id = TypeId::of::<T>();
 
@@ -58,7 +58,7 @@ impl DataLake
 
         self.subscriptions
             .entry(type_id)
-            .or_insert(PathTree::PathTree::<Subscriber>::new())
+            .or_insert(path_tree::PathTree::<Subscriber>::new())
             .add_payload(
                 path, 
                 Subscriber{transmitter : Box::new(tx)}
@@ -80,8 +80,8 @@ async fn single_publish_single_subscribe()
 
     let test_path =
         &[
-        PathTree::PathElement::Root,
-        PathTree::PathElement::Name("test".into())
+        path_tree::PathElement::Root,
+        path_tree::PathElement::Name("test".into())
         ];
     let mut fisher = datalake.subscribe::<&str>(test_path);
 
@@ -102,8 +102,8 @@ async fn single_publish_multi_subscribe()
 
     let test_path =
         &[
-        PathTree::PathElement::Root,
-        PathTree::PathElement::Name("test".into())
+        path_tree::PathElement::Root,
+        path_tree::PathElement::Name("test".into())
         ];
     let mut fisher1 = datalake.subscribe::<&str>(test_path);
     let mut fisher2 = datalake.subscribe::<&str>(test_path);
