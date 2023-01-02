@@ -18,11 +18,11 @@ pub enum PathElement
 
 fn consume_wildcard(wildcard: &mut (usize, usize)) -> bool
 {
-    if(wildcard.0 > 0)
+    if wildcard.0 > 0
     {
         wildcard.0 -= 1;
     }
-    else if (wildcard.1 > 0){
+    else if wildcard.1 > 0{
         wildcard.1 -= 1;
     }
     else {
@@ -60,6 +60,7 @@ struct Job<'path, 'tree, T>
 
 struct UniqueReferenceList<'payload, T>
 {
+    // Hack: rust references do not implement hash and eq traits. this is why I use an additional hashset with the ByAddress crate to check for duplicates. I did not want to expose the ByAddress crate in the user facing APU this is why i need to double maintain the result list here.
     hashset : HashSet<ByAddress<&'payload T>>,
     vector : Vec<&'payload T>
 }
@@ -91,17 +92,6 @@ impl<T> PathTree<T>
     {
         use PathElement::*;
         PathTree{element: Root, payloads: Vec::new(), childs: Vec::new()}
-    }
-
-    fn collect_results<'a>(hashset : &mut HashSet<ByAddress<&'a T>>, results : &mut Vec<&'a T>, payloads: &'a Vec<T>)
-    {
-        for payload in payloads.iter()
-        {
-            if hashset.insert(ByAddress(&payload))
-            {
-                results.push(payload);
-            }
-        }
     }
 
     pub fn add_payload(self: &mut Self, path: &[PathElement], payload: T)
@@ -153,10 +143,8 @@ impl<T> PathTree<T>
         return child.add_payload(&path[1..], payload)
     }
 
-    pub fn get_payloads<'a, 'b>(self: &'a Self, path: &'b [PathElement]) -> Vec<&'a T>
+    pub fn get_payloads<'tree, 'path>(self: &'tree Self, path: &'path [PathElement]) -> Vec<&'tree T>
     {
-        //println!("-----");
-
         let initial_job = Job{
                                     path: path,
                                     path_wildcard_override: None,
@@ -168,30 +156,19 @@ impl<T> PathTree<T>
         let mut jobs = Vec::new();
         jobs.push(initial_job);
 
-        // Hack: rust references do not implement hash and eq traits. this is why I use an additional hashset with the ByAddress crate to check for duplicates. I did not want to expose the ByAddress crate in the user facing APU this is why i need to double maintain the result list here:
-        //let mut result_hashmap : HashSet<usize> = HashSet::new();
-        // We need all this to filter out duplicates, which might happen, as different permutations of wildcards might match the same payload multiple times
-        //let mut result_hashmap : HashSet<ByAddress<&T>> = HashSet::new();
-        //let mut result : Vec<&'a T>= Vec::new();
-
+        // We need unique list to filter out duplicates, which might happen, as different permutations of wildcards might match the same payload multiple times
         let mut results = UniqueReferenceList::<T>::new();
 
-        'jobloop:
         loop {
             if jobs.is_empty()
             {
-                break 'jobloop;
+                break;
             }
             let job = jobs.pop().unwrap();
             let tree = job.tree;
             let path = job.path;
-            let tree_wildcard_override = job.tree_wildcard_override;
-            let path_wildcard_override = job.path_wildcard_override;
-
-            println!("job: tree={:?}(override: {:?}) path={:?}(override: {:?})", tree.element, tree_wildcard_override, path, path_wildcard_override);
 
             let tree_node = &tree.element;
-            //let path_node = &path[0];
             let path_node = path.get(0);
             match (tree_node, path_node)
             {
@@ -225,7 +202,7 @@ impl<T> PathTree<T>
                 {
                     return Vec::new();
                 },
-                (Name(tree_node_name), None) =>
+                (Name(_), None) =>
                 {
                     // tree expects name, but path is empty -> no matches, nothing to do
                 },
@@ -255,250 +232,199 @@ impl<T> PathTree<T>
                         }
                     }
                 },
-                (Name(tree_node_name), Some(Wildcard(path_wildcard))) =>
+                (Name(_), Some(Wildcard(path_wildcard))) =>
                 {
                     Self::_handle_path_only_wildcard(&path_wildcard, &job, &mut jobs, &mut results);
-                    //let mut path_wildcard = match job.path_wildcard_override
-                    //{
-                    //    Some(wc_override) => wc_override,
-                    //    None => path_wildcard.clone()
-                    //};
-                    
-                    //if path_wildcard.0 == 0 && path_wildcard.1 == 0
-                    //{
-                    //    // invalid wildcard
-                    //    // remove it and contine
-                    //    let job = Job{
-                    //        path: &path[1..], // full path, as WC might not be fully consumed
-                    //        path_wildcard_override: None,
-                    //        tree: &tree,
-                    //        tree_wildcard_override: None,
-                    //        parent_node: job.parent_node
-                    //        };
-                    //    jobs.push(job);
-                    //    continue 'jobloop;
-                    //}
-
-                    //// When minimums is 0, we also have the choice to NOT consume and skip the wildcard
-                    //if path_wildcard.0 == 0
-                    //{
-                    //    if let Some(parent) = job.parent_node
-                    //    {
-                    //        if path.len() == 1
-                    //        {
-                    //            println!("b");
-                    //            // wildcard skipped and it was last in path
-                    //            // -> no need to check nodes at this level, parent already is a match, add its payload:
-                    //            Self::collect_results(&mut result_hashmap, &mut result, & parent.payloads);
-                    //            println!("b!");
-                    //        }
-                    //    }
-                    //    // remove it
-                    //    let job = Job{
-                    //        path: &path[1..], // full path, as WC might not be fully consumed
-                    //        path_wildcard_override: None,
-                    //        tree: &tree,
-                    //        tree_wildcard_override: None,
-                    //        parent_node: job.parent_node
-                    //        };
-                    //    jobs.push(job);
-
-                    //}
-
-                    //if path.len() == 1 && path_wildcard.0 <= 1
-                    //{
-                    //    println!("a");
-                    //    // all matched and no more things to do for this path
-                    //    // collect the reward:
-                    //    Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
-                    //    println!("a!");
-                    //}
-                    //// consuming is always an option:
-                    //// add all childs after consuming one from the wildcard
-                    //for child in tree.childs.iter()
-                    //{
-                    //    let mut new_path_wildcard = path_wildcard.clone();
-                    //    consume_wildcard(&mut new_path_wildcard);
-                    //    let job = Job{
-                    //        path: &path[..], // full path, as WC might not be fully consumed
-                    //        path_wildcard_override: Some(new_path_wildcard),
-                    //        tree: child,
-                    //        tree_wildcard_override: None,
-                    //        parent_node: Some(&tree)
-                    //        };
-                    //    jobs.push(job);
-                    //}
                 },
-                (Wildcard(tree_wildcard), None) =>
+                (Wildcard(tree_wildcard), Some(Name(_))) =>
                 {
-                    if(tree_wildcard.0 == 0)
-                    {
-                        // wildcard is optional and may be skipped
-                        // -> we have a match! add payload:
-                        //Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
-                        results.append(&tree.payloads);
-                    }
-                },
-                (Wildcard(tree_wildcard), Some(Name(path_node_name))) =>
-                {
-                    // tree node is a wildcard => retrieve and override if required:
-                    let mut tree_wildcard = match job.tree_wildcard_override
-                    {
-                        Some(wc_override) => wc_override,
-                        None => tree_wildcard.clone()
-                    };
-                    if path.len() == 1 
-                    {
-                        // all matched and no more things to do for this path
-                        // collect the reward:
-                        //Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
-                        results.append(&tree.payloads);
-                        continue 'jobloop;
-                    }
-                    if tree_wildcard.0 == 0 && tree_wildcard.1 == 0
-                    {
-                        // invalid wildcard
-                        // remove it and contine
-                        for child in tree.childs.iter()
-                        {
-                            let job = Job{
-                                path: &path[..], // full path, as WC might not be fully consumed
-                                path_wildcard_override: None,
-                                tree: child,
-                                tree_wildcard_override: None,
-                                parent_node: Some(&tree)
-                                };
-                            jobs.push(job);
-                        }
-                        continue 'jobloop;
-                    }
-
-                    // no minumums required, so we might also skip wildcard here:
-                    if tree_wildcard.0 == 0
-                    {
-                        for child in tree.childs.iter()
-                        {
-                            let job = Job{
-                                path: &path[1..],
-                                path_wildcard_override: None,
-                                tree: child,
-                                tree_wildcard_override: None,
-                                parent_node: Some(&tree)
-                                };
-                            jobs.push(job);
-                        }
-                    }
-
-                    // consuming is always an option for valid wildcards:
-                    let mut new_tree_wildcard = tree_wildcard.clone();
-                    consume_wildcard(&mut new_tree_wildcard);
-                    let job = Job{
-                        path: &path[1..],
-                        path_wildcard_override: None,
-                        tree: &tree,
-                        tree_wildcard_override: Some(new_tree_wildcard),
-                        parent_node: Some(&tree)
-                        };
-                    jobs.push(job);
+                    Self::_handle_tree_only_wildcard(&tree_wildcard, &job, &mut jobs, &mut results);
                 },
                 (Wildcard(tree_wildcard), Some(Wildcard(path_wildcard))) =>
                 {
-                    if path.len() == 1
-                    {
-                        // all matched and no more things to do for this path
-                        // collect the reward:
-                        //Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
-                        results.append(&tree.payloads);
-
-                        // NOTE: path could is wildcard, still need to traverse deeper
-
-                        // TODO: this might be quite inefficient as we might recurse over big wildcards (imaging two 2^64 wildcards fighting)
-                        // need to somehow detect use-less wildcard permutations
-                    }
-                    // tree node is a wildcard => retrieve and override if required:
-                    let mut tree_wildcard = match job.tree_wildcard_override
-                    {
-                        Some(wc_override) => wc_override,
-                        None => tree_wildcard.clone()
-                    };
-                    // path node also wildcard => also override if required:
-                    let mut path_wildcard = match job.path_wildcard_override
-                    {
-                        Some(wc_override) => wc_override,
-                        None => path_wildcard.clone()
-                    };
-
-                    // we reduce this scenario down to a set of single wildcard scenarios by recursively removing/consuming from one wildcard:
-
-                    if tree_wildcard.0 == 0 && tree_wildcard.1 == 0
-                    {
-                        // invalid tree wildcard
-                        // remove it and contine
-                        for child in tree.childs.iter()
-                        {
-                            let job = Job{
-                                path: &path[..], // full path, as WC might not be fully consumed
-                                path_wildcard_override: None,
-                                tree: child,
-                                tree_wildcard_override: None,
-                                parent_node: Some(&tree)
-                                };
-                            jobs.push(job);
-                        }
-                        continue 'jobloop;
-                    }
-
-                    if path_wildcard.0 == 0 && path_wildcard.1 == 0
-                    {
-                        // invalid path wildcard
-                        // remove it and contine
-                        let job = Job{
-                            path: &path[1..], // full path, as WC might not be fully consumed
-                            path_wildcard_override: None,
-                            tree: tree,
-                            tree_wildcard_override: None,
-                            parent_node: job.parent_node
-                            };
-                        jobs.push(job);
-                        continue 'jobloop;
-                    }
-
-
-                    // no minumums required, so we might also skip wildcard here:
+                    Self::_handle_double_wildcard(& path_wildcard, &tree_wildcard, &job, &mut jobs, &mut results);
+                }
+                (Wildcard(tree_wildcard), None) =>
+                {
                     if tree_wildcard.0 == 0
                     {
-                        for child in tree.childs.iter()
-                        {
-                            let job = Job{
-                                path: &path[..], // full path, as WC might not be fully consumed
-                                path_wildcard_override: job.path_wildcard_override,
-                                tree: child,
-                                tree_wildcard_override: None,
-                                parent_node: Some(&tree)
-                                };
-                            jobs.push(job);
-                        }
+                        // wildcard is optional and may be skipped -> we have a match! add payload:
+                        results.append(&tree.payloads);
                     }
+                },
+            }
+        }
+        return results.vector;
+    }
 
-                    // consuming is always an option for valid wildcards:
-                    let mut new_tree_wildcard = tree_wildcard.clone();
-                    consume_wildcard(&mut new_tree_wildcard);
+    fn _handle_double_wildcard<'path, 'tree>(
+        path_wildcard: & (usize, usize),
+        tree_wildcard: & (usize, usize),
+        job: & Job<'path, 'tree, T>,
+        jobs: &mut Vec<Job<'path, 'tree, T>>,
+        results: &mut UniqueReferenceList<'tree, T>
+    )
+    {
+        if job.path.len() == 1
+        {
+            // all matched and no more things to do for this path
+            // collect the reward:
+            //Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
+            results.append(&job.tree.payloads);
 
-                    let mut new_path_wildcard = path_wildcard.clone();
-                    consume_wildcard(&mut new_path_wildcard);
-                    let job = Job{
-                        path: &path[..],
-                        path_wildcard_override: Some(new_path_wildcard),
-                        tree: tree,
-                        tree_wildcard_override: Some(new_tree_wildcard),
-                        parent_node: Some(&tree)
-                        };
-                    jobs.push(job);
-                }
+            // NOTE: path could is wildcard, still need to traverse deeper
+
+            // TODO: this might be quite inefficient as we might recurse over big wildcards (imaging two 2^64 wildcards fighting)
+            // need to somehow detect use-less wildcard permutations
+        }
+        // tree node is a wildcard => retrieve and override if required:
+        let tree_wildcard = match job.tree_wildcard_override
+        {
+            Some(wc_override) => wc_override,
+            None => tree_wildcard.clone()
+        };
+        // path node also wildcard => also override if required:
+        let path_wildcard = match job.path_wildcard_override
+        {
+            Some(wc_override) => wc_override,
+            None => path_wildcard.clone()
+        };
+
+        // we reduce this scenario down to a set of single wildcard scenarios by recursively removing/consuming from one wildcard:
+
+        if tree_wildcard.0 == 0 && tree_wildcard.1 == 0
+        {
+            // invalid tree wildcard
+            // remove it and contine
+            for child in job.tree.childs.iter()
+            {
+                let job = Job{
+                    path: &job.path[..], // full path, as WC might not be fully consumed
+                    path_wildcard_override: None,
+                    tree: child,
+                    tree_wildcard_override: None,
+                    parent_node: Some(&job.tree)
+                    };
+                jobs.push(job);
+            }
+            return;
+        }
+
+        if path_wildcard.0 == 0 && path_wildcard.1 == 0
+        {
+            // invalid path wildcard
+            // remove it and contine
+            let job = Job{
+                path: &job.path[1..], // full path, as WC might not be fully consumed
+                path_wildcard_override: None,
+                tree: job.tree,
+                tree_wildcard_override: None,
+                parent_node: job.parent_node
+                };
+            jobs.push(job);
+            return;
+        }
+
+
+        // no minumums required, so we might also skip wildcard here:
+        if tree_wildcard.0 == 0
+        {
+            for child in job.tree.childs.iter()
+            {
+                let job = Job{
+                    path: &job.path[..], // full path, as WC might not be fully consumed
+                    path_wildcard_override: job.path_wildcard_override,
+                    tree: child,
+                    tree_wildcard_override: None,
+                    parent_node: Some(&job.tree)
+                    };
+                jobs.push(job);
             }
         }
 
-        return results.vector;
+        // consuming is always an option for valid wildcards:
+        let mut new_tree_wildcard = tree_wildcard.clone();
+        consume_wildcard(&mut new_tree_wildcard);
+
+        let mut new_path_wildcard = path_wildcard.clone();
+        consume_wildcard(&mut new_path_wildcard);
+        let job = Job{
+            path: &job.path[..],
+            path_wildcard_override: Some(new_path_wildcard),
+            tree: job.tree,
+            tree_wildcard_override: Some(new_tree_wildcard),
+            parent_node: Some(&job.tree)
+            };
+        jobs.push(job);
+
+    }
+
+    fn _handle_tree_only_wildcard<'path, 'tree>(
+        tree_wildcard: & (usize, usize),
+        job: & Job<'path, 'tree, T>,
+        jobs: &mut Vec<Job<'path, 'tree, T>>,
+        results: &mut UniqueReferenceList<'tree, T>
+    )
+    {
+        // tree node is a wildcard => retrieve and override if required:
+        let tree_wildcard = match job.tree_wildcard_override
+        {
+            Some(wc_override) => wc_override,
+            None => tree_wildcard.clone()
+        };
+        if job.path.len() == 1 
+        {
+            // all matched and no more things to do for this path
+            // collect the reward:
+            //Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
+            results.append(&job.tree.payloads);
+            return;
+        }
+        if tree_wildcard.0 == 0 && tree_wildcard.1 == 0
+        {
+            // invalid wildcard
+            // remove it and contine
+            for child in job.tree.childs.iter()
+            {
+                let job = Job{
+                    path: &job.path[..], // full path, as WC might not be fully consumed
+                    path_wildcard_override: None,
+                    tree: child,
+                    tree_wildcard_override: None,
+                    parent_node: Some(&job.tree)
+                    };
+                jobs.push(job);
+            }
+            return;
+        }
+
+        // no minumums required, so we might also skip wildcard here:
+        if tree_wildcard.0 == 0
+        {
+            for child in job.tree.childs.iter()
+            {
+                let job = Job{
+                    path: &job.path[1..],
+                    path_wildcard_override: None,
+                    tree: child,
+                    tree_wildcard_override: None,
+                    parent_node: Some(&job.tree)
+                    };
+                jobs.push(job);
+            }
+        }
+
+        // consuming is always an option for valid wildcards:
+        let mut new_tree_wildcard = tree_wildcard.clone();
+        consume_wildcard(&mut new_tree_wildcard);
+        let job = Job{
+            path: &job.path[1..],
+            path_wildcard_override: None,
+            tree: &job.tree,
+            tree_wildcard_override: Some(new_tree_wildcard),
+            parent_node: Some(&job.tree)
+            };
+        jobs.push(job);
     }
 
     fn _handle_path_only_wildcard<'path, 'tree>(
@@ -508,7 +434,7 @@ impl<T> PathTree<T>
         results: &mut UniqueReferenceList<'tree, T>
     )
     {
-        let mut path_wildcard = match job.path_wildcard_override
+        let path_wildcard = match job.path_wildcard_override
         {
             Some(wc_override) => wc_override,
             None => path_wildcard.clone()
