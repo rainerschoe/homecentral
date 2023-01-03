@@ -178,7 +178,6 @@ impl<T> PathTree<T>
                     {
                         // all matched and no more things to do for this path
                         // collect the reward:
-                        //Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
                         results.append(& tree.payloads);
                     }
                     for child in tree.childs.iter()
@@ -211,12 +210,10 @@ impl<T> PathTree<T>
                     // match -> add all childs to job list
                     if tree_node_name == path_node_name
                     {
-                        //if path.len() == 1 && tree.childs.len() == 0
                         if path.len() == 1
                         {
                             // all matched and no more things to do for this path
                             // collect the reward:
-                            //Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
                             results.append(&tree.payloads);
                         }
                         for child in tree.childs.iter()
@@ -269,7 +266,6 @@ impl<T> PathTree<T>
         {
             // all matched and no more things to do for this path
             // collect the reward:
-            //Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
             results.append(&job.tree.payloads);
 
             // NOTE: path could is wildcard, still need to traverse deeper
@@ -277,12 +273,14 @@ impl<T> PathTree<T>
             // TODO: this might be quite inefficient as we might recurse over big wildcards (imaging two 2^64 wildcards fighting)
             // need to somehow detect use-less wildcard permutations
         }
+
         // tree node is a wildcard => retrieve and override if required:
         let tree_wildcard = match job.tree_wildcard_override
         {
             Some(wc_override) => wc_override,
             None => tree_wildcard.clone()
         };
+
         // path node also wildcard => also override if required:
         let path_wildcard = match job.path_wildcard_override
         {
@@ -376,7 +374,6 @@ impl<T> PathTree<T>
         {
             // all matched and no more things to do for this path
             // collect the reward:
-            //Self::collect_results(&mut result_hashmap, &mut result, & tree.payloads);
             results.append(&job.tree.payloads);
             return;
         }
@@ -465,7 +462,6 @@ impl<T> PathTree<T>
                     println!("b");
                     // wildcard skipped and it was last in path
                     // -> no need to check nodes at this level, parent already is a match, add its payload:
-                    //Self::collect_results(&mut result_hashmap, &mut result, & parent.payloads);
                     results.append(&parent.payloads);
                     println!("b!");
                 }
@@ -479,7 +475,6 @@ impl<T> PathTree<T>
                 parent_node: job.parent_node
                 };
             jobs.push(job);
-
         }
 
         if job.path.len() == 1 && path_wildcard.0 <= 1
@@ -507,7 +502,6 @@ impl<T> PathTree<T>
 }
 
 #[test]
-//#[ignore = "tofireasonx"]
 fn test_add_payload_to_root()
 {
     use PathElement::*;
@@ -902,7 +896,6 @@ fn test_wildcard_in_tree()
     assert!(results.contains(&&"severything"));
 }
 
-//#[ignore]
 #[test]
 fn test_wildcard_in_tree_and_path()
 {
