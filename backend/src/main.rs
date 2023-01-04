@@ -3,6 +3,7 @@ use std::any::Any;
 use std::collections::HashMap;
 
 pub mod path_tree;
+    use path_tree::*;
 
 struct DataLake 
 {
@@ -36,18 +37,30 @@ impl DataLake
     {
         let type_id = TypeId::of::<T>();
         let boxed_object = Box::new(object);
-        let possible_subscribers = self.subscriptions.entry(type_id).or_insert(path_tree::PathTree::<Subscriber>::new()); // FIXME: should not insert here!
+        let possible_subscribers_opt = self.subscriptions.get(&type_id);
 
-        for subscriber in
-        possible_subscribers.get_payloads(path)
+        match possible_subscribers_opt
         {
-            let sender = match subscriber.transmitter.downcast_ref::<tokio::sync::mpsc::Sender<T>>()
+            Some(possible_subscribers) =>
             {
-                Some(boxed_sender) => boxed_sender,
-                None => panic!("Publish and subscribe types do not match! This should not happen and is a programming error in the pubsub lib." )
-            };
-            sender.send((*boxed_object).clone()).await.unwrap(); // FIXME: handle error here (receiver dropped)
+                for subscriber in
+                possible_subscribers.get_payloads(path)
+                {
+                    let sender = match subscriber.transmitter.downcast_ref::<tokio::sync::mpsc::Sender<T>>()
+                    {
+                        Some(boxed_sender) => boxed_sender,
+                        None => panic!("Publish and subscribe types do not match! This should not happen and is a programming error in the pubsub lib." )
+                    };
+                    sender.send((*boxed_object).clone()).await.unwrap(); // FIXME: handle error here (receiver dropped)
+                }
+            }
+            None => return
         }
+    }
+
+    fn subscribe_simple<T: 'static, P: AsRef<str>>(self: &mut Self, path: P) -> Fisher<T>
+    {
+        self.subscribe(path_tree::parse_path(path.as_ref()).as_slice())
     }
 
     fn subscribe<T: 'static>(self: &mut Self, path: &[path_tree::PathElement]) -> Fisher<T>
@@ -55,12 +68,11 @@ impl DataLake
         let type_id = TypeId::of::<T>();
 
         let (tx, rx) = tokio::sync::mpsc::channel::<T>(10); // Buffer of hard coded size for now, if more elements queued, backpressure active i.e. send() will block
-
         self.subscriptions
             .entry(type_id)
             .or_insert(path_tree::PathTree::<Subscriber>::new())
             .add_payload(
-                path, 
+                &path.into(), 
                 Subscriber{transmitter : Box::new(tx)}
              );
 
@@ -106,7 +118,8 @@ async fn single_publish_multi_subscribe()
         path_tree::PathElement::Name("test".into())
         ];
     let mut fisher1 = datalake.subscribe::<&str>(test_path);
-    let mut fisher2 = datalake.subscribe::<&str>(test_path);
+    //let mut fisher2 = datalake.subscribe::<&str>(test_path);
+    let mut fisher2 = datalake.subscribe_simple::<&str,_>("/test");
 
     datalake.publish(test_path, "data").await;
 
