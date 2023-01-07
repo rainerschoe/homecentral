@@ -22,7 +22,7 @@ impl TDataLake
 
     async fn publish
     <
-    T : 'static /* for TypeId */ + Clone /* for sending to multi subscribers */ + std::fmt::Debug /* for tokio mpsc */
+    T : 'static /* for TypeId */ + Clone /* for sending to multi subscribers */ + std::fmt::Debug /* for tokio mpsc */ + Send + Sync
     >
     (self: & Self, path: &path_tree::Path, object: T)
     {
@@ -30,7 +30,7 @@ impl TDataLake
         lake.publish(path, object).await
     }
 
-    async fn subscribe<T: 'static>(self: &mut Self, path: &Path) -> Fisher<T>
+    async fn subscribe<T: 'static + Send + Sync>(self: &mut Self, path: &Path) -> Fisher<T>
     {
         let mut lake = self.lake.write().await;
         lake.subscribe(path)
@@ -46,7 +46,7 @@ struct DataLake
 #[derive(Debug)]
 struct Subscriber
 {
-    transmitter: Box<dyn Any>,
+    transmitter: Box<dyn Any + Send + Sync>,
 }
 
 struct Fisher<T>
@@ -64,7 +64,7 @@ impl DataLake
 
     async fn publish
     <
-    T : 'static /* for TypeId */ + Clone /* for sending to multi subscribers */ + std::fmt::Debug /* for tokio mpsc */
+    T : 'static /* for TypeId */ + Clone /* for sending to multi subscribers */ + std::fmt::Debug /* for tokio mpsc */ + Send + Sync
     >
     (self: & Self, path: &path_tree::Path, object: T)
     {
@@ -91,13 +91,13 @@ impl DataLake
         }
     }
 
-    fn subscribe_simple<T: 'static, P: AsRef<str>>(self: &mut Self, path: P) -> Fisher<T>
+    fn subscribe_simple<T: 'static + Send + Sync, P: AsRef<str>>(self: &mut Self, path: P) -> Fisher<T>
     {
         // TODO: how to handle error here? return invalid fisher??
         self.subscribe(&path.as_ref().parse().unwrap())
     }
 
-    fn subscribe<T: 'static>(self: &mut Self, path: &Path) -> Fisher<T>
+    fn subscribe<T: 'static + Send>(self: &mut Self, path: &Path) -> Fisher<T>
     {
         let type_id = TypeId::of::<T>();
 
@@ -136,6 +136,31 @@ async fn single_publish_single_subscribe()
     }
 }
 
+#[tokio::test]
+async fn multi_task_publish_subscribe()
+{
+    let mut datalake = TDataLake::new();
+    let mut datalake2 = datalake.clone();
+
+
+    let join1 = tokio::task::spawn(async move {
+        let mut sub = datalake.subscribe::<String>(&"/test".parse().unwrap()).await;
+        for i in 1..10
+        {
+            let data = sub.receiver.recv().await;
+            println!("rx{}: {}", i, data.unwrap());
+        }
+    });
+    let join2 = tokio::task::spawn(async move {
+        for i in 1..10
+        {
+            datalake2.publish::<String>(&"/test".parse().unwrap(), "hallo".into()).await;
+        }
+    });
+    join1.await.unwrap();
+    join2.await.unwrap();
+
+}
 #[tokio::test]
 async fn single_publish_multi_subscribe()
 {
