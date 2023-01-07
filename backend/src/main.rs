@@ -33,7 +33,7 @@ impl DataLake
     <
     T : 'static /* for TypeId */ + Clone /* for sending to multi subscribers */ + std::fmt::Debug /* for tokio mpsc */
     >
-    (self: &mut Self, path: &[path_tree::PathElement], object: T)
+    (self: &mut Self, path: &path_tree::Path, object: T)
     {
         let type_id = TypeId::of::<T>();
         let boxed_object = Box::new(object);
@@ -60,10 +60,10 @@ impl DataLake
 
     fn subscribe_simple<T: 'static, P: AsRef<str>>(self: &mut Self, path: P) -> Fisher<T>
     {
-        self.subscribe(path_tree::parse_path(path.as_ref()).as_slice())
+        self.subscribe(&path.as_ref().parse().unwrap())
     }
 
-    fn subscribe<T: 'static>(self: &mut Self, path: &[path_tree::PathElement]) -> Fisher<T>
+    fn subscribe<T: 'static>(self: &mut Self, path: &Path) -> Fisher<T>
     {
         let type_id = TypeId::of::<T>();
 
@@ -72,7 +72,7 @@ impl DataLake
             .entry(type_id)
             .or_insert(path_tree::PathTree::<Subscriber>::new())
             .add_payload(
-                &path.into(), 
+                path, 
                 Subscriber{transmitter : Box::new(tx)}
              );
 
@@ -90,14 +90,9 @@ async fn single_publish_single_subscribe()
 {
     let mut datalake = DataLake::new();
 
-    let test_path =
-        &[
-        path_tree::PathElement::Root,
-        path_tree::PathElement::Name("test".into())
-        ];
-    let mut fisher = datalake.subscribe::<&str>(test_path);
+    let mut fisher = datalake.subscribe::<&str>(&"/test".parse().unwrap());
 
-    datalake.publish::<&str>(test_path, "data").await;
+    datalake.publish::<&str>(&"/test".parse().unwrap(), "data").await;
 
     let asd = fisher.receiver.try_recv();
     match asd
@@ -112,16 +107,12 @@ async fn single_publish_multi_subscribe()
 {
     let mut datalake = DataLake::new();
 
-    let test_path =
-        &[
-        path_tree::PathElement::Root,
-        path_tree::PathElement::Name("test".into())
-        ];
-    let mut fisher1 = datalake.subscribe::<&str>(test_path);
+    let test_path = "/test".parse::<path_tree::Path>().unwrap();
+    let mut fisher1 = datalake.subscribe::<&str>(&test_path);
     //let mut fisher2 = datalake.subscribe::<&str>(test_path);
     let mut fisher2 = datalake.subscribe_simple::<&str,_>("/test");
 
-    datalake.publish(test_path, "data").await;
+    datalake.publish(&test_path, "data").await;
 
     let asd = fisher1.receiver.try_recv();
     match asd

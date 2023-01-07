@@ -90,7 +90,7 @@ impl FromStr for Path
         {
             return Err("Path needs to start with '/'".into());
         }
-        if ! s.ends_with("/")
+        if s.ends_with("/") && s.len() > 1
         {
             return Err("Path may not end with '/'".into());
         }
@@ -148,45 +148,8 @@ impl FromStr for PathElement
     }
 }
 
-
-/// Legacy
-#[deprecated]
-pub fn parse_path<T : AsRef<str>>(path_string: T) -> Vec<PathElement>
-{
-    let path_str = path_string.as_ref();
-    let mut comp_it = path_str.split("/").skip_while(|x| x.eq(&""));
-
-    let mut result = Vec::new();
-    result.push(Root);
-    for element in comp_it
-    {
-        if(element.starts_with("*"))
-        {
-            match element
-            {
-                "*" => {result.push(Wildcard((1,0)))},
-                "**" => {result.push(Wildcard((0,9)))},
-                _ => {result.push(Name(element.into()))}
-            }
-        }
-        else
-        {
-            result.push(Name(element.into()));
-        }
-    }
-
-    return result;
-}
-
-#[test]
-fn test_parse_path()
-{
-    let path = parse_path("/asd/fgh");
-    assert!(path.len() == 3);
-    let path = parse_path("asd/fgh");
-    assert!(path.len() == 3);
-}
-
+// subtracts 1 from wildcard, preferred from mandatory count, if this is 0 from optional count.
+// returns true if wildcard is fully consumed.
 fn consume_wildcard(wildcard: &mut (usize, usize)) -> bool
 {
     if wildcard.0 > 0
@@ -346,7 +309,10 @@ impl<T> PathTree<T>
         return child.add_payload_internal(&path[1..], payload)
     }
 
-    pub fn get_payloads<'tree, 'path>(self: &'tree Self, path: &'path Path) -> Vec<&'tree T>
+    pub fn get_payloads<'tree, 'path>(
+        self: &'tree Self,
+        path: &'path Path
+    ) -> Vec<&'tree T>
     {
         let path = path.elements.as_slice();
         let initial_job = Job{
@@ -708,7 +674,7 @@ fn test_add_payload_to_root()
 {
     use PathElement::*;
     let mut tree = PathTree::<&str>::new();
-    tree.add_payload(&[Root], "data");
+    tree.add_payload(&"/".parse().unwrap(), "data");
     assert!(tree.element == Root);
     assert!(tree.childs.len() == 0);
     assert!(tree.payloads.len() == 1);
@@ -720,436 +686,437 @@ fn test_add_payload_to_2root()
 {
     use PathElement::*;
     let mut tree = PathTree::<&str>::new();
-    tree.add_payload(&(&[Root, Root]).into(), "data");
+    tree.add_payload(&([Root, Root][..]).into(), "data");
     assert!(tree.element == Root);
     assert!(tree.childs.len() == 0);
     assert!(tree.payloads.len() == 1);
     assert!(tree.payloads[0] == "data");
 }
 
-//#[test]
-//#[should_panic]
-//fn test_add_payload_to_root_in_the_middle()
-//{
-//    use PathElement::*;
-//    let mut tree = PathTree::<&str>::new();
-//    tree.add_payload(&[Root, Name("test".into()), Root], "data");
-//}
-//
-//#[test]
-//fn test_add_payload()
-//{
-//    use PathElement::*;
-//    let mut tree = PathTree::<&str>::new();
-//    tree.add_payload(&[Root, Name("test".into())], "data");
-//    assert!(tree.element == Root);
-//    assert!(tree.childs.len() == 1);
-//    assert!(tree.childs[0].element == Name("test".into()));
-//    assert!(tree.childs[0].payloads.len() == 1);
-//    assert!(tree.childs[0].payloads[0] == "data");
-//}
-//
-//#[test]
-//fn test_add_2payload_same_path()
-//{
-//    use PathElement::*;
-//    let mut tree = PathTree::<&str>::new();
-//    tree.add_payload(&[Root, Name("test".into())], "data");
-//    tree.add_payload(&[Root, Name("test".into())], "data2");
-//    assert!(tree.element == Root);
-//    assert!(tree.childs.len() == 1);
-//    assert!(tree.childs[0].element == Name("test".into()));
-//    assert!(tree.childs[0].payloads.len() == 2);
-//    assert!(tree.childs[0].payloads[0] == "data");
-//    assert!(tree.childs[0].payloads[1] == "data2");
-//}
-//
-//#[test]
-//fn test_add_2payload_different_path()
-//{
-//    use PathElement::*;
-//    let mut tree = PathTree::<&str>::new();
-//    tree.add_payload(&[Root, Name("test".into())], "data");
-//    tree.add_payload(&[Root, Name("test2".into())], "data2");
-//    assert!(tree.element == Root);
-//    assert!(tree.childs.len() == 2);
-//    assert!(tree.childs[0].element == Name("test".into()));
-//    assert!(tree.childs[0].payloads.len() == 1);
-//    assert!(tree.childs[0].payloads[0] == "data");
-//    assert!(tree.childs[1].element == Name("test2".into()));
-//    assert!(tree.childs[1].payloads.len() == 1);
-//    assert!(tree.childs[1].payloads[0] == "data2");
-//}
-//
-//#[test]
-//fn test_add_2payload_different_deep_path()
-//{
-//    use PathElement::*;
-//    let mut tree = PathTree::<&str>::new();
-//    tree.add_payload(&[Root, Name("l1".into()), Name("l12".into())], "data1");
-//    tree.add_payload(&[Root, Name("l2".into()), Name("l22".into())], "data2");
-//    assert!(tree.element == Root);
-//    assert!(tree.childs.len() == 2);
-//    assert!(tree.childs[0].element == Name("l1".into()));
-//    assert!(tree.childs[0].payloads.len() == 0);
-//    assert!(tree.childs[1].element == Name("l2".into()));
-//    assert!(tree.childs[1].payloads.len() == 0);
-//
-//    assert!(tree.childs[0].childs.len() == 1);
-//    assert!(tree.childs[0].childs[0].element == Name("l12".into()));
-//    assert!(tree.childs[0].childs[0].payloads.len() == 1);
-//    assert!(tree.childs[0].childs[0].payloads[0] == "data1");
-//
-//    assert!(tree.childs[1].childs.len() == 1);
-//    assert!(tree.childs[1].childs[0].element == Name("l22".into()));
-//    assert!(tree.childs[1].childs[0].payloads.len() == 1);
-//    assert!(tree.childs[1].childs[0].payloads[0] == "data2");
-//
-//}
-//
-//
-//#[test]
-//fn test_get_payloads()
-//{
-//    use PathElement::*;
-//    let mut tree = PathTree::<&str>::new();
-//    let path = [Root, Name("test".into())];
-//    tree.add_payload(&path, "data");
-//    assert!(tree.get_payloads(&[Root, Name("test".into())]).len() == 1);
-//    assert!(tree.get_payloads(&[Root, Name("test".into())]).contains(&&"data"));
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 1);
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).contains(&&"data"));
-//    //assert!(tree.get_payloads(&path).len() == 1);
-//    //assert!(tree.get_payloads(&path)[0] == &"data");
-//}
-//
-//#[test]
-//fn test_get_payloads_relative_path()
-//{
-//    use PathElement::*;
-//    let mut tree = PathTree::<&str>::new();
-//    let path = [Root, Name("l1".into()), Name("l2".into())];
-//    tree.add_payload(&path, "data");
-//    assert!(tree.childs.len() == 1);
-//    assert!(tree.childs[0].get_payloads(&[Wildcard((1,0)), Wildcard((1,0))]).len() == 1);
-//    assert!(tree.childs[0].get_payloads(&[Wildcard((1,0)), Wildcard((1,0))]).contains(&&"data"));
-//    assert!(tree.childs[0].childs.len() == 1);
-//    assert!(tree.childs[0].childs[0].get_payloads(&[Wildcard((1,0))]).len() == 1);
-//    assert!(tree.childs[0].childs[0].get_payloads(&[Wildcard((1,0))]).contains(&&"data"));
-//    assert!(tree.childs[0].get_payloads(&path).len() == 0);
-//}
-//
-//#[test]
-//fn test_get_2payloads_same_path()
-//{
-//    use PathElement::*;
-//    let mut tree = PathTree::<&str>::new();
-//    let path = [Root, Name("test".into())];
-//    tree.add_payload(&path, "data");
-//    tree.add_payload(&path, "data2");
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 2);
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).contains(&&"data"));
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 2);
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).contains(&&"data2"));
-//    assert!(tree.get_payloads(&path).len() == 2);
-//    assert!(tree.get_payloads(&path).contains(&&"data"));
-//    assert!(tree.get_payloads(&path).contains(&&"data2"));
-//}
-//
-//#[test]
-//fn test_get_2payload_different_path()
-//{
-//    use PathElement::*;
-//    let mut tree = PathTree::<&str>::new();
-//    let path1 = [Root, Name("test".into())];
-//    let path2 = [Root, Name("test2".into())];
-//    tree.add_payload(&path1, "data");
-//    tree.add_payload(&path2, "data2");
-//    assert!(tree.get_payloads(&[Root]).len() == 0);
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 2);
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).contains(&&"data"));
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).contains(&&"data2"));
-//    assert!(tree.get_payloads(&path1).len() == 1);
-//    assert!(tree.get_payloads(&path2).len() == 1);
-//    assert!(tree.get_payloads(&path1).contains(&&"data"));
-//    assert!(tree.get_payloads(&path2).contains(&&"data2"));
-//}
-//
-//#[test]
-//fn test_get_2path_different_deep_path()
-//{
-//    use PathElement::*;
-//    let mut tree = PathTree::<&str>::new();
-//    let path1 = [Root, Name("l1".into()), Name("l12".into())];
-//    let path2 = [Root, Name("l1".into()), Name("l22".into())];
-//    tree.add_payload(&path1, "data1");
-//    tree.add_payload(&path2, "data2");
-//    assert!(tree.get_payloads(&[Root]).len() == 0);
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 0);
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Name("l12".into())]).len() == 1);
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Name("l12".into())]).contains(&&"data1"));
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Wildcard((1,0))]).len() == 2);
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Wildcard((1,0))]).contains(&&"data1"));
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0)), Wildcard((1,0))]).contains(&&"data2"));
-//
-//    assert!(tree.get_payloads(&path1).len() == 1);
-//    assert!(tree.get_payloads(&path2).len() == 1);
-//    assert!(tree.get_payloads(&path1).contains(&&"data1"));
-//    assert!(tree.get_payloads(&path2).contains(&&"data2"));
-//}
-//
-//#[test]
-//fn test_wildcard_at_end_of_path()
-//{
-//    // roota        sroot
-//    //    l1        s1
-//    //      l11     s11
-//    //      l12     s12
-//    //    l2        s2
-//    //      l21     s21
-//    //      l22     s22
-//    use PathElement::*;
-//    let mut tree = PathTree::<&str>::new();
-//    tree.add_payload(&[Root], "sroot");
-//    tree.add_payload(&[Root, Name("l1".into())], "s1");
-//    tree.add_payload(&[Root, Name("l1".into()), Name("l11".into())], "s11");
-//    tree.add_payload(&[Root, Name("l1".into()), Name("l12".into())], "s12");
-//    tree.add_payload(&[Root, Name("l2".into())], "s2");
-//    tree.add_payload(&[Root, Name("l2".into()), Name("l21".into())], "s21");
-//    tree.add_payload(&[Root, Name("l2".into()), Name("l22".into())], "s22");
-//
-//    assert!(tree.get_payloads(&[Root]).len() == 1);
-//    assert!(tree.get_payloads(&[Root]).contains(&&"sroot"));
-//
-//    assert!(tree.get_payloads(&[Root, Name("l1".into())]).len() == 1);
-//    assert!(tree.get_payloads(&[Root, Name("l1".into())]).contains(&&"s1"));
-//
-//    assert!(tree.get_payloads(&[Root, Name("l1".into()), Name("l11".into())]).len() == 1);
-//    assert!(tree.get_payloads(&[Root, Name("l1".into()), Name("l11".into())]).contains(&&"s11"));
-//
-//    assert!(tree.get_payloads(&[Root, Name("l1".into()), Name("l12".into())]).len() == 1);
-//    assert!(tree.get_payloads(&[Root, Name("l1".into()), Name("l12".into())]).contains(&&"s12"));
-//
-//    assert!(tree.get_payloads(&[Root, Name("l2".into())]).len() == 1);
-//    assert!(tree.get_payloads(&[Root, Name("l2".into())]).contains(&&"s2"));
-//
-//    assert!(tree.get_payloads(&[Root, Name("l2".into()), Name("l21".into())]).len() == 1);
-//    assert!(tree.get_payloads(&[Root, Name("l2".into()), Name("l21".into())]).contains(&&"s21"));
-//
-//    assert!(tree.get_payloads(&[Root, Name("l2".into()), Name("l22".into())]).len() == 1);
-//    assert!(tree.get_payloads(&[Root, Name("l2".into()), Name("l22".into())]).contains(&&"s22"));
-//
-//    assert!(tree.get_payloads(&[Root, Name("l2".into()), Wildcard((1,0))]).len() == 2);
-//    assert!(tree.get_payloads(&[Root, Name("l2".into()), Wildcard((1,0))]).contains(&&"s21"));
-//    assert!(tree.get_payloads(&[Root, Name("l2".into()), Wildcard((1,0))]).contains(&&"s22"));
-//
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).len() == 2);
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).contains(&&"s1"));
-//    assert!(tree.get_payloads(&[Root, Wildcard((1,0))]).contains(&&"s2"));
-//
-//    let results = tree.get_payloads(&[Root, Wildcard((0,1))]);
-//    println!("res={:#?}", results);
-//    assert!(results.len() == 3);
-//    assert!(results.contains(&&"s1"));
-//    assert!(results.contains(&&"s2"));
-//    assert!(results.contains(&&"sroot"));
-//
-//    let results = tree.get_payloads(&[Root, Wildcard((0,2))]);
-//    println!("res={:#?}", results);
-//    assert!(results.len() == 7);
-//    assert!(results.contains(&&"s1"));
-//    assert!(results.contains(&&"s11"));
-//    assert!(results.contains(&&"s12"));
-//    assert!(results.contains(&&"s2"));
-//    assert!(results.contains(&&"s21"));
-//    assert!(results.contains(&&"s22"));
-//    assert!(results.contains(&&"sroot"));
-//
-//    let results = tree.get_payloads(&[Root, Wildcard((1,1))]);
-//    println!("res={:#?}", results);
-//    assert!(results.len() == 6);
-//    assert!(results.contains(&&"s1"));
-//    assert!(results.contains(&&"s11"));
-//    assert!(results.contains(&&"s12"));
-//    assert!(results.contains(&&"s2"));
-//    assert!(results.contains(&&"s21"));
-//    assert!(results.contains(&&"s22"));
-//
-//    let results = tree.get_payloads(&[Root, Wildcard((2,0))]);
-//    println!("res={:#?}", results);
-//    assert!(results.len() == 4);
-//    assert!(results.contains(&&"s11"));
-//    assert!(results.contains(&&"s12"));
-//    assert!(results.contains(&&"s21"));
-//    assert!(results.contains(&&"s22"));
-//
-//    let results = tree.get_payloads(&[Root, Wildcard((3,0))]);
-//    println!("res={:#?}", results);
-//    assert!(results.len() == 0);
-//}
-//
-//#[test]
-//fn test_wildcard_in_middle()
-//{
-//    // roota        sroot
-//    //    l1        s1
-//    //      same    s1same
-//    //      l12     s12
-//    //    l2        s2
-//    //      l21     s21
-//    //      l22     s22
-//    //      same    s2same
-//    //    same      srootsame
-//    use PathElement::*;
-//    let mut tree = PathTree::<&str>::new();
-//    tree.add_payload(&[Root], "sroot");
-//    tree.add_payload(&[Root, Name("same".into())], "srootsame");
-//    tree.add_payload(&[Root, Name("l1".into())], "s1");
-//    tree.add_payload(&[Root, Name("l1".into()), Name("same".into())], "s1same");
-//    tree.add_payload(&[Root, Name("l1".into()), Name("l12".into())], "s12");
-//    tree.add_payload(&[Root, Name("l2".into())], "s2");
-//    tree.add_payload(&[Root, Name("l2".into()), Name("l21".into())], "s21");
-//    tree.add_payload(&[Root, Name("l2".into()), Name("l22".into())], "s22");
-//    tree.add_payload(&[Root, Name("l2".into()), Name("same".into())], "s2same");
-//
-//    let results = tree.get_payloads(&[Root, Wildcard((1,0)), Name("same".into())]);
-//    println!("res={:#?}", results);
-//    assert!(results.len() == 2);
-//    assert!(results.contains(&&"s1same"));
-//    assert!(results.contains(&&"s2same"));
-//
-//    let results = tree.get_payloads(&[Root, Wildcard((0,1)), Name("same".into())]);
-//    println!("res={:#?}", results);
-//    assert!(results.len() == 3);
-//    assert!(results.contains(&&"s1same"));
-//    assert!(results.contains(&&"s2same"));
-//    assert!(results.contains(&&"srootsame"));
-//
-//    let results = tree.get_payloads(&[Root, Wildcard((1,1)), Name("same".into())]);
-//    println!("res={:#?}", results);
-//    assert!(results.len() == 2);
-//    assert!(results.contains(&&"s1same"));
-//    assert!(results.contains(&&"s2same"));
-//
-//    let results = tree.get_payloads(&[Root, Wildcard((0,10)), Name("same".into())]);
-//    println!("res={:#?}", results);
-//    assert!(results.len() == 3);
-//    assert!(results.contains(&&"s1same"));
-//    assert!(results.contains(&&"s2same"));
-//    assert!(results.contains(&&"srootsame"));
-//}
-//
-//#[test]
-//fn test_wildcard_in_tree()
-//{
-//    // roota        sroot
-//    //    l1        s1
-//    //      l11     s11
-//    //    l2        s2
-//    //      l21     s21
-//    //      light   s2light
-//    //      l22     s22
-//    //      *1,0    s2x
-//    //      *0,1    s2opt
-//    //    *0,100    severyting
-//    //      light   sanyLight
-//    use PathElement::*;
-//    let mut tree = PathTree::<&str>::new();
-//    tree.add_payload(&[Root], "sroot");
-//    tree.add_payload(&[Root, Name("same".into())], "srootsame");
-//    tree.add_payload(&[Root, Wildcard((0,100))], "severything");
-//    tree.add_payload(&[Root, Wildcard((0,100)), Name("light".into())], "sanyLight");
-//    tree.add_payload(&[Root, Name("l1".into())], "s1");
-//    tree.add_payload(&[Root, Name("l1".into()), Name("l11".into())], "s11");
-//    tree.add_payload(&[Root, Name("l2".into())], "s2");
-//    tree.add_payload(&[Root, Name("l2".into()), Name("l21".into())], "s21");
-//    tree.add_payload(&[Root, Name("l2".into()), Name("light".into())], "s2light");
-//    tree.add_payload(&[Root, Name("l2".into()), Name("l22".into())], "s22");
-//    tree.add_payload(&[Root, Name("l2".into()), Name("l22".into())], "s22");
-//    tree.add_payload(&[Root, Name("l2".into()), Wildcard((1,0))], "s2x");
-//    tree.add_payload(&[Root, Name("l2".into()), Wildcard((0,1))], "s2opt");
-//
-//    let results = tree.get_payloads(&[Root, Name("l1".into())]);
-//    println!("res={:#?}", results);
-//    assert!(results.len() == 2);
-//    assert!(results.contains(&&"s1"));
-//    assert!(results.contains(&&"severything"));
-//
-//    let results = tree.get_payloads(&[Root, Name("l2".into()), Name("light".into())]);
-//    println!("res={:#?}", results);
-//    assert!(results.len() == 5);
-//    assert!(results.contains(&&"s2opt"));
-//    assert!(results.contains(&&"s2x"));
-//    assert!(results.contains(&&"s2light"));
-//    assert!(results.contains(&&"sanyLight"));
-//    assert!(results.contains(&&"severything"));
-//
-//    let results = tree.get_payloads(&[Root, Name("l1".into()), Name("light".into())]);
-//    println!("res={:#?}", results);
-//    assert!(results.len() == 2);
-//    assert!(results.contains(&&"sanyLight"));
-//    assert!(results.contains(&&"severything"));
-//
-//    let results = tree.get_payloads(&[Root, Name("l2".into())]);
-//    println!("res={:#?}", results);
-//    assert!(results.len() == 3);
-//    assert!(results.contains(&&"s2"));
-//    assert!(results.contains(&&"s2opt"));
-//    assert!(results.contains(&&"severything"));
-//}
-//
-//#[test]
-//fn test_wildcard_in_tree_and_path()
-//{
-//    // roota        sroot
-//    //    l1        s1
-//    //      l11     s11
-//    //    l2        s2
-//    //      l21     s21
-//    //      light   s2light
-//    //      l22     s22
-//    //      *1,0    s2x
-//    //      *0,1    s2opt
-//    //    *0,100    severyting
-//    //      light   sanyLight
-//    //    same      srootsame
-//
-//    use PathElement::*;
-//    let mut tree = PathTree::<&str>::new();
-//    tree.add_payload((&[Root]).into() , "sroot");
-//    tree.add_payload(&[Root, Name("same".into())], "srootsame");
-//    tree.add_payload(&[Root, Wildcard((0,100))], "severything");
-//    tree.add_payload(&[Root, Wildcard((0,100)), Name("light".into())], "sanyLight");
-//    tree.add_payload(&[Root, Name("l1".into())], "s1");
-//    tree.add_payload(&[Root, Name("l1".into()), Name("l11".into())], "s11");
-//    tree.add_payload(&[Root, Name("l2".into())], "s2");
-//    tree.add_payload(&[Root, Name("l2".into()), Name("l21".into())], "s21");
-//    tree.add_payload(&[Root, Name("l2".into()), Name("light".into())], "s2light");
-//    tree.add_payload(&[Root, Name("l2".into()), Name("l22".into())], "s22");
-//    tree.add_payload(&[Root, Name("l2".into()), Wildcard((1,0))], "s2x");
-//    tree.add_payload(&[Root, Name("l2".into()), Wildcard((0,1))], "s2opt");
-//
-//    println!("Tree:\n{}", tree);
-//    let results = tree.get_payloads(&[Root, Wildcard((0,10))]);
-//    println!("res={:#?}", results);
-//    assert!(results.len() == 12);
-//    assert!(results.contains(&&"s1"));
-//    assert!(results.contains(&&"s11"));
-//    assert!(results.contains(&&"s2"));
-//    assert!(results.contains(&&"s21"));
-//    assert!(results.contains(&&"s2light"));
-//    assert!(results.contains(&&"s22"));
-//    assert!(results.contains(&&"s2x"));
-//    assert!(results.contains(&&"s2opt"));
-//    assert!(results.contains(&&"sanyLight"));
-//    assert!(results.contains(&&"severything"));
-//    assert!(results.contains(&&"sroot"));
-//    assert!(results.contains(&&"srootsame"));
-//
-//    let results = tree.get_payloads(&[Root, Wildcard((0,10)), Name("light".into())]);
-//    println!("res={:#?}", results);
-//    assert!(results.len() == 3);
-//    assert!(results.contains(&&"severything"));
-//    assert!(results.contains(&&"sanyLight"));
-//    assert!(results.contains(&&"s2light"));
-//}
+#[test]
+#[should_panic]
+fn test_add_payload_to_root_in_the_middle()
+{
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&([Root, Name("test".into()), Root][..]).into(), "data");
+}
+
+#[test]
+#[should_panic]
+fn test_add_payload_to_root_in_the_middle_str()
+{
+    let _path : Path = "/test/".parse().unwrap();
+}
+
+#[test]
+fn test_add_payload()
+{
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&"/test".parse().unwrap(), "data");
+    assert!(tree.element == Root);
+    assert!(tree.childs.len() == 1);
+    assert!(tree.childs[0].element == Name("test".into()));
+    assert!(tree.childs[0].payloads.len() == 1);
+    assert!(tree.childs[0].payloads[0] == "data");
+}
+
+#[test]
+fn test_add_2payload_same_path()
+{
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&"/test".parse().unwrap(), "data");
+    tree.add_payload(&"/test".parse().unwrap(), "data2");
+    assert!(tree.element == Root);
+    assert!(tree.childs.len() == 1);
+    assert!(tree.childs[0].element == Name("test".into()));
+    assert!(tree.childs[0].payloads.len() == 2);
+    assert!(tree.childs[0].payloads[0] == "data");
+    assert!(tree.childs[0].payloads[1] == "data2");
+}
+
+#[test]
+fn test_add_2payload_different_path()
+{
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&"/test".parse().unwrap(), "data");
+    tree.add_payload(&"/test2".parse().unwrap(), "data2");
+    assert!(tree.element == Root);
+    assert!(tree.childs.len() == 2);
+    assert!(tree.childs[0].element == Name("test".into()));
+    assert!(tree.childs[0].payloads.len() == 1);
+    assert!(tree.childs[0].payloads[0] == "data");
+    assert!(tree.childs[1].element == Name("test2".into()));
+    assert!(tree.childs[1].payloads.len() == 1);
+    assert!(tree.childs[1].payloads[0] == "data2");
+}
+
+#[test]
+fn test_add_2payload_different_deep_path()
+{
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&"/l1/l12".parse().unwrap(), "data1");
+    tree.add_payload(&"/l2/l22".parse().unwrap(), "data2");
+    assert!(tree.element == Root);
+    assert!(tree.childs.len() == 2);
+    assert!(tree.childs[0].element == Name("l1".into()));
+    assert!(tree.childs[0].payloads.len() == 0);
+    assert!(tree.childs[1].element == Name("l2".into()));
+    assert!(tree.childs[1].payloads.len() == 0);
+
+    assert!(tree.childs[0].childs.len() == 1);
+    assert!(tree.childs[0].childs[0].element == Name("l12".into()));
+    assert!(tree.childs[0].childs[0].payloads.len() == 1);
+    assert!(tree.childs[0].childs[0].payloads[0] == "data1");
+
+    assert!(tree.childs[1].childs.len() == 1);
+    assert!(tree.childs[1].childs[0].element == Name("l22".into()));
+    assert!(tree.childs[1].childs[0].payloads.len() == 1);
+    assert!(tree.childs[1].childs[0].payloads[0] == "data2");
+
+}
+
+
+#[test]
+fn test_get_payloads()
+{
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&"/test".parse().unwrap(), "data");
+    assert!(tree.get_payloads(&"/test".parse().unwrap()).len() == 1);
+    assert!(tree.get_payloads(&"/test".parse().unwrap()).contains(&&"data"));
+    assert!(tree.get_payloads(&"/*".parse().unwrap()).len() == 1);
+    assert!(tree.get_payloads(&"/*".parse().unwrap()).contains(&&"data"));
+}
+
+#[test]
+fn test_get_payloads_relative_path()
+{
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    let path = "/l1/l2".parse().unwrap();
+    tree.add_payload(&path, "data");
+    assert!(tree.childs.len() == 1);
+    assert!(tree.childs[0].get_payloads(&[Wildcard((1,0)), Wildcard((1,0))][..].into()).len() == 1);
+    assert!(tree.childs[0].get_payloads(&[Wildcard((1,0)), Wildcard((1,0))][..].into()).contains(&&"data"));
+    assert!(tree.childs[0].childs.len() == 1);
+    assert!(tree.childs[0].childs[0].get_payloads(&[Wildcard((1,0))][..].into()).len() == 1);
+    assert!(tree.childs[0].childs[0].get_payloads(&[Wildcard((1,0))][..].into()).contains(&&"data"));
+    assert!(tree.childs[0].get_payloads(&path).len() == 0); // from child0 started
+}
+
+#[test]
+fn test_get_2payloads_same_path()
+{
+    let mut tree = PathTree::<&str>::new();
+    let path = "/test".parse().unwrap();
+    tree.add_payload(&path, "data");
+    tree.add_payload(&path, "data2");
+    assert!(tree.get_payloads(&"/*".parse().unwrap()).len() == 2);
+    assert!(tree.get_payloads(&"/*".parse().unwrap()).contains(&&"data"));
+    assert!(tree.get_payloads(&"/*".parse().unwrap()).len() == 2);
+    assert!(tree.get_payloads(&"/*".parse().unwrap()).contains(&&"data2"));
+    assert!(tree.get_payloads(&path).len() == 2);
+    assert!(tree.get_payloads(&path).contains(&&"data"));
+    assert!(tree.get_payloads(&path).contains(&&"data2"));
+}
+
+#[test]
+fn test_get_2payload_different_path()
+{
+    let mut tree = PathTree::<&str>::new();
+    let path1 = "/test".parse().unwrap();
+    let path2 = "/test2".parse().unwrap();
+    tree.add_payload(&path1, "data");
+    tree.add_payload(&path2, "data2");
+    assert!(tree.get_payloads(&"/".parse().unwrap()).len() == 0);
+    assert!(tree.get_payloads(&"/*1,0".parse().unwrap()).len() == 2);
+    assert!(tree.get_payloads(&"/*1,0".parse().unwrap()).contains(&&"data"));
+    assert!(tree.get_payloads(&"/*1,0".parse().unwrap()).contains(&&"data2"));
+    assert!(tree.get_payloads(&path1).len() == 1);
+    assert!(tree.get_payloads(&path2).len() == 1);
+    assert!(tree.get_payloads(&path1).contains(&&"data"));
+    assert!(tree.get_payloads(&path2).contains(&&"data2"));
+}
+
+#[test]
+fn test_get_2path_different_deep_path()
+{
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    let path1 = [Root, Name("l1".into()), Name("l12".into())][..].into();
+    let path2 = [Root, Name("l1".into()), Name("l22".into())][..].into();
+    tree.add_payload(&path1, "data1");
+    tree.add_payload(&path2, "data2");
+    assert!(tree.get_payloads(&"/".parse().unwrap()).len() == 0);
+    assert!(tree.get_payloads(&"/*".parse().unwrap()).len() == 0);
+    assert!(tree.get_payloads(&"/*/l12".parse().unwrap()).len() == 1);
+    assert!(tree.get_payloads(&"/*/l12".parse().unwrap()).contains(&&"data1"));
+    assert!(tree.get_payloads(&"/*/*".parse().unwrap()).len() == 2);
+    assert!(tree.get_payloads(&"/*/*".parse().unwrap()).contains(&&"data1"));
+    assert!(tree.get_payloads(&"/*/*".parse().unwrap()).contains(&&"data2"));
+
+    assert!(tree.get_payloads(&path1).len() == 1);
+    assert!(tree.get_payloads(&path2).len() == 1);
+    assert!(tree.get_payloads(&path1).contains(&&"data1"));
+    assert!(tree.get_payloads(&path2).contains(&&"data2"));
+}
+
+#[test]
+fn test_wildcard_at_end_of_path()
+{
+    // roota        sroot
+    //    l1        s1
+    //      l11     s11
+    //      l12     s12
+    //    l2        s2
+    //      l21     s21
+    //      l22     s22
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&[Root][..].into(), "sroot");
+    tree.add_payload(&[Root, Name("l1".into())][..].into(), "s1");
+    tree.add_payload(&[Root, Name("l1".into()), Name("l11".into())][..].into(), "s11");
+    tree.add_payload(&[Root, Name("l1".into()), Name("l12".into())][..].into(), "s12");
+    tree.add_payload(&[Root, Name("l2".into())][..].into(), "s2");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l21".into())][..].into(), "s21");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l22".into())][..].into(), "s22");
+
+    assert!(tree.get_payloads(&[Root][..].into()).len() == 1);
+    assert!(tree.get_payloads(&[Root][..].into()).contains(&&"sroot"));
+
+    assert!(tree.get_payloads(&[Root, Name("l1".into())][..].into()).len() == 1);
+    assert!(tree.get_payloads(&[Root, Name("l1".into())][..].into()).contains(&&"s1"));
+
+    assert!(tree.get_payloads(&[Root, Name("l1".into()), Name("l11".into())][..].into()).len() == 1);
+    assert!(tree.get_payloads(&[Root, Name("l1".into()), Name("l11".into())][..].into()).contains(&&"s11"));
+
+    assert!(tree.get_payloads(&[Root, Name("l1".into()), Name("l12".into())][..].into()).len() == 1);
+    assert!(tree.get_payloads(&[Root, Name("l1".into()), Name("l12".into())][..].into()).contains(&&"s12"));
+
+    assert!(tree.get_payloads(&[Root, Name("l2".into())][..].into()).len() == 1);
+    assert!(tree.get_payloads(&[Root, Name("l2".into())][..].into()).contains(&&"s2"));
+
+    assert!(tree.get_payloads(&[Root, Name("l2".into()), Name("l21".into())][..].into()).len() == 1);
+    assert!(tree.get_payloads(&[Root, Name("l2".into()), Name("l21".into())][..].into()).contains(&&"s21"));
+
+    assert!(tree.get_payloads(&[Root, Name("l2".into()), Name("l22".into())][..].into()).len() == 1);
+    assert!(tree.get_payloads(&[Root, Name("l2".into()), Name("l22".into())][..].into()).contains(&&"s22"));
+
+    assert!(tree.get_payloads(&[Root, Name("l2".into()), Wildcard((1,0))][..].into()).len() == 2);
+    assert!(tree.get_payloads(&[Root, Name("l2".into()), Wildcard((1,0))][..].into()).contains(&&"s21"));
+    assert!(tree.get_payloads(&[Root, Name("l2".into()), Wildcard((1,0))][..].into()).contains(&&"s22"));
+
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))][..].into()).len() == 2);
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))][..].into()).contains(&&"s1"));
+    assert!(tree.get_payloads(&[Root, Wildcard((1,0))][..].into()).contains(&&"s2"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((0,1))][..].into());
+    println!("res={:#?}", results);
+    assert!(results.len() == 3);
+    assert!(results.contains(&&"s1"));
+    assert!(results.contains(&&"s2"));
+    assert!(results.contains(&&"sroot"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((0,2))][..].into());
+    println!("res={:#?}", results);
+    assert!(results.len() == 7);
+    assert!(results.contains(&&"s1"));
+    assert!(results.contains(&&"s11"));
+    assert!(results.contains(&&"s12"));
+    assert!(results.contains(&&"s2"));
+    assert!(results.contains(&&"s21"));
+    assert!(results.contains(&&"s22"));
+    assert!(results.contains(&&"sroot"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((1,1))][..].into());
+    println!("res={:#?}", results);
+    assert!(results.len() == 6);
+    assert!(results.contains(&&"s1"));
+    assert!(results.contains(&&"s11"));
+    assert!(results.contains(&&"s12"));
+    assert!(results.contains(&&"s2"));
+    assert!(results.contains(&&"s21"));
+    assert!(results.contains(&&"s22"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((2,0))][..].into());
+    println!("res={:#?}", results);
+    assert!(results.len() == 4);
+    assert!(results.contains(&&"s11"));
+    assert!(results.contains(&&"s12"));
+    assert!(results.contains(&&"s21"));
+    assert!(results.contains(&&"s22"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((3,0))][..].into());
+    println!("res={:#?}", results);
+    assert!(results.len() == 0);
+}
+
+#[test]
+fn test_wildcard_in_middle()
+{
+    // roota        sroot
+    //    l1        s1
+    //      same    s1same
+    //      l12     s12
+    //    l2        s2
+    //      l21     s21
+    //      l22     s22
+    //      same    s2same
+    //    same      srootsame
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&[Root][..].into(), "sroot");
+    tree.add_payload(&[Root, Name("same".into())][..].into(), "srootsame");
+    tree.add_payload(&[Root, Name("l1".into())][..].into(), "s1");
+    tree.add_payload(&[Root, Name("l1".into()), Name("same".into())][..].into(), "s1same");
+    tree.add_payload(&[Root, Name("l1".into()), Name("l12".into())][..].into(), "s12");
+    tree.add_payload(&[Root, Name("l2".into())][..].into(), "s2");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l21".into())][..].into(), "s21");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l22".into())][..].into(), "s22");
+    tree.add_payload(&[Root, Name("l2".into()), Name("same".into())][..].into(), "s2same");
+
+    let results = tree.get_payloads(&[Root, Wildcard((1,0)), Name("same".into())][..].into());
+    println!("res={:#?}", results);
+    assert!(results.len() == 2);
+    assert!(results.contains(&&"s1same"));
+    assert!(results.contains(&&"s2same"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((0,1)), Name("same".into())][..].into());
+    println!("res={:#?}", results);
+    assert!(results.len() == 3);
+    assert!(results.contains(&&"s1same"));
+    assert!(results.contains(&&"s2same"));
+    assert!(results.contains(&&"srootsame"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((1,1)), Name("same".into())][..].into());
+    println!("res={:#?}", results);
+    assert!(results.len() == 2);
+    assert!(results.contains(&&"s1same"));
+    assert!(results.contains(&&"s2same"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((0,10)), Name("same".into())][..].into());
+    println!("res={:#?}", results);
+    assert!(results.len() == 3);
+    assert!(results.contains(&&"s1same"));
+    assert!(results.contains(&&"s2same"));
+    assert!(results.contains(&&"srootsame"));
+}
+
+#[test]
+fn test_wildcard_in_tree()
+{
+    // roota        sroot
+    //    l1        s1
+    //      l11     s11
+    //    l2        s2
+    //      l21     s21
+    //      light   s2light
+    //      l22     s22
+    //      *1,0    s2x
+    //      *0,1    s2opt
+    //    *0,100    severyting
+    //      light   sanyLight
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&[Root][..].into(), "sroot");
+    tree.add_payload(&[Root, Name("same".into())][..].into(), "srootsame");
+    tree.add_payload(&[Root, Wildcard((0,100))][..].into(), "severything");
+    tree.add_payload(&[Root, Wildcard((0,100)), Name("light".into())][..].into(), "sanyLight");
+    tree.add_payload(&[Root, Name("l1".into())][..].into(), "s1");
+    tree.add_payload(&[Root, Name("l1".into()), Name("l11".into())][..].into(), "s11");
+    tree.add_payload(&[Root, Name("l2".into())][..].into(), "s2");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l21".into())][..].into(), "s21");
+    tree.add_payload(&[Root, Name("l2".into()), Name("light".into())][..].into(), "s2light");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l22".into())][..].into(), "s22");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l22".into())][..].into(), "s22");
+    tree.add_payload(&[Root, Name("l2".into()), Wildcard((1,0))][..].into(), "s2x");
+    tree.add_payload(&[Root, Name("l2".into()), Wildcard((0,1))][..].into(), "s2opt");
+
+    let results = tree.get_payloads(&[Root, Name("l1".into())][..].into());
+    println!("res={:#?}", results);
+    assert!(results.len() == 2);
+    assert!(results.contains(&&"s1"));
+    assert!(results.contains(&&"severything"));
+
+    let results = tree.get_payloads(&[Root, Name("l2".into()), Name("light".into())][..].into());
+    println!("res={:#?}", results);
+    assert!(results.len() == 5);
+    assert!(results.contains(&&"s2opt"));
+    assert!(results.contains(&&"s2x"));
+    assert!(results.contains(&&"s2light"));
+    assert!(results.contains(&&"sanyLight"));
+    assert!(results.contains(&&"severything"));
+
+    let results = tree.get_payloads(&[Root, Name("l1".into()), Name("light".into())][..].into());
+    println!("res={:#?}", results);
+    assert!(results.len() == 2);
+    assert!(results.contains(&&"sanyLight"));
+    assert!(results.contains(&&"severything"));
+
+    let results = tree.get_payloads(&[Root, Name("l2".into())][..].into());
+    println!("res={:#?}", results);
+    assert!(results.len() == 3);
+    assert!(results.contains(&&"s2"));
+    assert!(results.contains(&&"s2opt"));
+    assert!(results.contains(&&"severything"));
+}
+
+#[test]
+fn test_wildcard_in_tree_and_path()
+{
+    // roota        sroot
+    //    l1        s1
+    //      l11     s11
+    //    l2        s2
+    //      l21     s21
+    //      light   s2light
+    //      l22     s22
+    //      *1,0    s2x
+    //      *0,1    s2opt
+    //    *0,100    severyting
+    //      light   sanyLight
+    //    same      srootsame
+
+    use PathElement::*;
+    let mut tree = PathTree::<&str>::new();
+    tree.add_payload(&[Root][..].into() , "sroot");
+    tree.add_payload(&[Root, Name("same".into())][..].into(), "srootsame");
+    tree.add_payload(&[Root, Wildcard((0,100))][..].into(), "severything");
+    tree.add_payload(&[Root, Wildcard((0,100)), Name("light".into())][..].into(), "sanyLight");
+    tree.add_payload(&[Root, Name("l1".into())][..].into(), "s1");
+    tree.add_payload(&[Root, Name("l1".into()), Name("l11".into())][..].into(), "s11");
+    tree.add_payload(&[Root, Name("l2".into())][..].into(), "s2");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l21".into())][..].into(), "s21");
+    tree.add_payload(&[Root, Name("l2".into()), Name("light".into())][..].into(), "s2light");
+    tree.add_payload(&[Root, Name("l2".into()), Name("l22".into())][..].into(), "s22");
+    tree.add_payload(&[Root, Name("l2".into()), Wildcard((1,0))][..].into(), "s2x");
+    tree.add_payload(&[Root, Name("l2".into()), Wildcard((0,1))][..].into(), "s2opt");
+
+    println!("Tree:\n{}", tree);
+    let results = tree.get_payloads(&[Root, Wildcard((0,10))][..].into());
+    println!("res={:#?}", results);
+    assert!(results.len() == 12);
+    assert!(results.contains(&&"s1"));
+    assert!(results.contains(&&"s11"));
+    assert!(results.contains(&&"s2"));
+    assert!(results.contains(&&"s21"));
+    assert!(results.contains(&&"s2light"));
+    assert!(results.contains(&&"s22"));
+    assert!(results.contains(&&"s2x"));
+    assert!(results.contains(&&"s2opt"));
+    assert!(results.contains(&&"sanyLight"));
+    assert!(results.contains(&&"severything"));
+    assert!(results.contains(&&"sroot"));
+    assert!(results.contains(&&"srootsame"));
+
+    let results = tree.get_payloads(&[Root, Wildcard((0,10)), Name("light".into())][..].into());
+    println!("res={:#?}", results);
+    assert!(results.len() == 3);
+    assert!(results.contains(&&"severything"));
+    assert!(results.contains(&&"sanyLight"));
+    assert!(results.contains(&&"s2light"));
+}
