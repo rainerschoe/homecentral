@@ -140,7 +140,7 @@ async fn single_publish_single_subscribe()
 async fn multi_task_publish_subscribe()
 {
     let mut datalake = TDataLake::new();
-    let mut datalake2 = datalake.clone();
+    let datalake2 = datalake.clone();
 
 
     let join1 = tokio::task::spawn(async move {
@@ -152,13 +152,14 @@ async fn multi_task_publish_subscribe()
         }
     });
     let join2 = tokio::task::spawn(async move {
-        for i in 1..10
+        for _ in 1..10
         {
             datalake2.publish::<String>(&"/test".parse().unwrap(), "hallo".into()).await;
         }
     });
     join1.await.unwrap();
     join2.await.unwrap();
+    assert!(false);
 
 }
 #[tokio::test]
