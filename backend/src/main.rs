@@ -1,9 +1,42 @@
 use std::any::TypeId;
 use std::any::Any;
 use std::collections::HashMap;
+use tokio::sync::RwLock;
+use std::sync::Arc;
 
 pub mod path_tree;
     use path_tree::*;
+
+#[derive(Clone)]
+struct TDataLake
+{
+    lake : Arc<RwLock<DataLake>>
+}
+
+impl TDataLake
+{
+    fn new() -> Self
+    {
+        TDataLake{lake: Arc::new(RwLock::new(DataLake::new()))}
+    }
+
+    async fn publish
+    <
+    T : 'static /* for TypeId */ + Clone /* for sending to multi subscribers */ + std::fmt::Debug /* for tokio mpsc */
+    >
+    (self: & Self, path: &path_tree::Path, object: T)
+    {
+        let lake = self.lake.read().await;
+        lake.publish(path, object).await
+    }
+
+    async fn subscribe<T: 'static>(self: &mut Self, path: &Path) -> Fisher<T>
+    {
+        let mut lake = self.lake.write().await;
+        lake.subscribe(path)
+    }
+
+}
 
 struct DataLake 
 {
@@ -33,7 +66,7 @@ impl DataLake
     <
     T : 'static /* for TypeId */ + Clone /* for sending to multi subscribers */ + std::fmt::Debug /* for tokio mpsc */
     >
-    (self: &mut Self, path: &path_tree::Path, object: T)
+    (self: & Self, path: &path_tree::Path, object: T)
     {
         let type_id = TypeId::of::<T>();
         let boxed_object = Box::new(object);
@@ -60,6 +93,7 @@ impl DataLake
 
     fn subscribe_simple<T: 'static, P: AsRef<str>>(self: &mut Self, path: P) -> Fisher<T>
     {
+        // TODO: how to handle error here? return invalid fisher??
         self.subscribe(&path.as_ref().parse().unwrap())
     }
 
