@@ -1,0 +1,30 @@
+syntax = "proto3";                                         
+package bus;
+
+
+message SendJsonMessageRequest {                                            
+    string remote_address = 1;                                   
+    string data = 2;                                       
+    uint32 timeout_milliseconds = 3;
+}
+
+message ReceiveJsonMessage
+{
+    string remote_address = 1;
+    string data = 2;
+}
+
+message ConnectionSetup
+{
+    string rxMask = 1;                                   
+    string remoteAddress = 2;
+}
+
+message Empty{}                                            
+
+service MessagePackBusAccess                                          
+{                                                          
+    rpc send(SendJsonMessageRequest) returns (Empty);
+    rpc receive(ConnectionSetup) returns (stream ReceiveJsonMessage);
+}
+
