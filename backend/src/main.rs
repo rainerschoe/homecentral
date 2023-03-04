@@ -6,7 +6,7 @@ use data_lake::*;
 
 
 pub mod bus {
-    tonic::include_proto!("bus");
+    tonic::include_proto!("_");
 }
 //use futures::stream::Stream;
 use tokio_stream::StreamExt;
@@ -23,7 +23,13 @@ async fn receive_from_bus_and_publish(datalake: TDataLake, server_url: String, p
         rx_mask: "255:255".into(),
         remote_address: "200:1".into(),
     };
+    //let req = bus::SendJsonMessageRequest {
+    //    remote_address: "200:1".into(),
+    //    data: "{}".into(),
+    //    timeout_milliseconds: 5000
+    //};
     let response = client.receive(req).await.unwrap();
+    // I think proto filename needs to match
 
     let mut resp_stream = response.into_inner();
     while let Some(received) = resp_stream.next().await {
@@ -38,7 +44,7 @@ async fn receive_from_bus_and_publish(datalake: TDataLake, server_url: String, p
 async fn main() -> ()
 {
     let mut datalake = TDataLake::new();
-    receive_from_bus_and_publish(datalake, "ipv4://192.168.0.200:50051".into(), "bus/receive/ug".into()).await;
+    receive_from_bus_and_publish(datalake, "http://192.168.0.200:50051".into(), "bus/receive/ug".into()).await;
 }
 
 #[tokio::test]

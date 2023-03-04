@@ -1,0 +1,146 @@
+syntax = "proto3";                                         
+
+
+message SendRequest {                                            
+    string remote_address = 1;                                   
+    bytes data = 2;                                       
+    uint32 timeout_milliseconds = 3;
+}
+
+message SendJsonMessageRequest {                                            
+    string remote_address = 1;                                   
+    string data = 2;                                       
+    uint32 timeout_milliseconds = 3;
+}
+
+message ReceiveRequest
+{                                            
+    string remote_mask = 1;                                   
+    string remote_address = 2;
+    uint32 timeout_milliseconds = 3;
+}
+
+message ReceiveReply
+{
+    string remote_address = 1;
+    bytes data = 2;
+}
+
+message ReceiveJsonMessage
+{
+    string remote_address = 1;
+    string data = 2;
+}
+
+message ConnectionSetup
+{
+    string rxMask = 1;                                   
+    string remoteAddress = 2;
+}
+
+message Empty{}                                            
+
+message I2cViaPjonRequest
+{
+    string remote_address = 1;
+    uint32 i2c_bus_number = 2;
+    uint32 i2c_7bit_device_address = 3;
+    bytes data_write = 4;
+    uint32 num_bytes_read = 5;
+}
+
+message I2cViaPjonReply
+{
+    bytes dataRead = 2;
+}
+
+service RawBusAccess                                          
+{                                                          
+    rpc send(SendRequest) returns (Empty);
+    rpc receive(ReceiveRequest) returns (ReceiveReply);
+}
+
+service MessagePackBusAccess                                          
+{                                                          
+    rpc send(SendJsonMessageRequest) returns (Empty);
+    rpc receive(ConnectionSetup) returns (stream ReceiveJsonMessage);
+}
+
+message FlashRequest
+{
+    string remote_address = 1;
+    bytes device_signature = 2;
+    bytes application     = 3;
+    bool skip_reboot = 4;
+}
+
+message FlashViaI2cRequest
+{
+    string remote_address = 1;
+    uint32 i2c_bus_number = 2;
+    uint32 i2c_7bit_device_address = 3;
+    bytes device_signature = 4;
+    bytes application     = 5;
+    bool skip_reboot = 6;
+}
+
+message FlashState
+{
+    string status_message = 2;
+}
+
+message ScanDevicesRequest
+{
+    uint32 timeout_milliseconds = 1;
+}
+
+message ScanDevicesReply
+{
+    string device_address = 1;
+    string device_name = 2;
+}
+
+message RebootDeviceRequest
+{
+    string device_address = 1;
+}
+
+message IdentifyDeviceRequest
+{
+    string device_address = 1;
+}
+
+message SetDeviceAddressRequest
+{
+    string device_address = 1;
+    string new_device_address = 2;
+}
+
+message SetDeviceNameRequest
+{
+    string device_address = 1;
+    string new_device_name = 2;
+}
+
+service HomeControl
+{
+    rpc scanDevices(ScanDevicesRequest) returns (stream ScanDevicesReply);
+    rpc identifyDevice(IdentifyDeviceRequest) returns (ScanDevicesReply);
+    rpc flash(FlashRequest) returns (stream FlashState);
+    rpc flashViaI2c(FlashViaI2cRequest) returns (stream FlashState);
+    rpc rebootDevice(RebootDeviceRequest) returns (Empty);
+    rpc setDeviceAddress(SetDeviceAddressRequest) returns (Empty);
+    rpc setDeviceName(SetDeviceNameRequest) returns (Empty);
+    rpc i2cViaPjon(I2cViaPjonRequest) returns (I2cViaPjonReply);
+}
+message VersionInformation
+{
+  string commit_date = 1;
+  string commit_short = 2;
+  string commit_sha1 = 3;
+  bool uncommitted_changes = 4;
+}
+service Debug
+{
+  rpc getRscomVersion(Empty) returns (VersionInformation);
+}
