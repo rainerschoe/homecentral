@@ -46,7 +46,6 @@ async fn receive_from_bus_and_publish(datalake: TDataLake, server_url: String, p
                 datalake.publish(&("/bus/rx/".to_owned() + deviceId.as_str()).as_str().parse().unwrap(), received.data).await;
             }
         }
-
     }
 
 
@@ -56,7 +55,22 @@ async fn receive_from_bus_and_publish(datalake: TDataLake, server_url: String, p
 async fn main() -> ()
 {
     let mut datalake = TDataLake::new();
-    receive_from_bus_and_publish(datalake, "http://192.168.0.200:50051".into(), "bus/receive/ug".into()).await;
+
+    let datalake_bus = datalake.clone();
+    let join1 = tokio::task::spawn(async move {
+        receive_from_bus_and_publish(datalake_bus, "http://192.168.0.200:50051".into(), "bus/receive/ug".into()).await;
+        }
+    );
+
+
+    let mut sub = datalake.subscribe::<String>(&"/bus/rx/*".parse().unwrap()).await;
+    loop
+    {
+        let data = sub.receiver.recv().await;
+        println!("rx: {}", data.unwrap());
+    }
+
+    //join1.await.unwrap();
 }
 
 #[tokio::test]
