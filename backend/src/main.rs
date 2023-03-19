@@ -4,6 +4,7 @@ use data_lake::*;
 //use bus::MessagePackBusAccess;
 //use bus::ConnectionSetup;
 
+use regex::Regex;
 
 pub mod bus {
     tonic::include_proto!("_");
@@ -20,8 +21,8 @@ async fn receive_from_bus_and_publish(datalake: TDataLake, server_url: String, p
     //    remote_address: "255:255".into(),
     //});
     let req = bus::ConnectionSetup {
-        rx_mask: "255:255".into(),
-        remote_address: "200:1".into(),
+        rx_mask: "0:255".into(),
+        remote_address: "0:1".into(),
     };
     //let req = bus::SendJsonMessageRequest {
     //    remote_address: "200:1".into(),
@@ -35,6 +36,17 @@ async fn receive_from_bus_and_publish(datalake: TDataLake, server_url: String, p
     while let Some(received) = resp_stream.next().await {
         let received = received.unwrap();
         println!("\treceived message: `{:?}`", received);
+
+        let re = Regex::new(r".*([0-9]+):.*").unwrap();
+        let captures = re.captures(received.remote_address.as_str());
+        if let Some(captures) = captures 
+        {
+            if let Some(deviceId) = captures.get(1)
+            {
+                datalake.publish(&("/bus/rx/".to_owned() + deviceId.as_str()).as_str().parse().unwrap(), received.data).await;
+            }
+        }
+
     }
 
 
