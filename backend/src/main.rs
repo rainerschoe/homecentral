@@ -28,9 +28,18 @@ mod BusAccess
         join_handle: tokio::task::JoinHandle::<()>,
     }
 
-    impl crate::NodeHandle for BusAccessHandle
+    //impl crate::NodeHandle for BusAccessHandle
+    //{
+    //    fn stop(self: Self)
+    //    {
+    //        self.stop_sender.send(());
+    //        tokio::runtime::Handle::try_current().unwrap().block_on(self.join_handle);
+    //    }
+    //}
+
+    impl Drop for BusAccessHandle
     {
-        fn stop(self: Self)
+        fn drop(self: &mut Self)
         {
             self.stop_sender.send(());
             tokio::runtime::Handle::try_current().unwrap().block_on(self.join_handle);
@@ -118,7 +127,6 @@ async fn main() -> ()
 {
     let mut datalake = TDataLake::new();
 
-    let datalake_bus = datalake.clone();
     let bus_handle = BusAccess::create(datalake.clone(), "http://192.168.0.200:50051".into(), "bus/receive/ug".into());
 
 
@@ -129,7 +137,7 @@ async fn main() -> ()
         println!("rx: {}", data.unwrap());
     }
 
-    bus_handle.stop();
+    //bus_handle.stop();
 
     //join1.await.unwrap();
 }
