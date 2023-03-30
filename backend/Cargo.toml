@@ -12,6 +12,7 @@ tonic = "0.8"
 prost = "0.11"
 regex = "1"
 tokio-stream = { version = "0.1"}
+#futures = "0.3"
 #futures = { version = "0.3", default-features = false}
 
 [build-dependencies]
