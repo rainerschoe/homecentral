@@ -13,36 +13,24 @@ pub mod bus {
 use tokio_stream::StreamExt;
 
 
-// TODO: could use drop trait instead?
-pub trait NodeHandle
-{
-    fn stop(self: Self);
-}
-
 mod BusAccess
 {
     use crate::*;
     pub struct BusAccessHandle
     {
-        stop_sender: tokio::sync::oneshot::Sender<()>,
-        join_handle: tokio::task::JoinHandle::<()>,
+        stop_sender: Option<tokio::sync::oneshot::Sender<()>>,
+        join_handle: Option<tokio::task::JoinHandle::<()>>,
     }
 
-    //impl crate::NodeHandle for BusAccessHandle
-    //{
-    //    fn stop(self: Self)
-    //    {
-    //        self.stop_sender.send(());
-    //        tokio::runtime::Handle::try_current().unwrap().block_on(self.join_handle);
-    //    }
-    //}
-
+    // TODO: use `signal-hook` crate to catch signals and cleanly exit the main() function in order
+    // to utilize drop here...
     impl Drop for BusAccessHandle
     {
         fn drop(self: &mut Self)
         {
-            self.stop_sender.send(());
-            tokio::runtime::Handle::try_current().unwrap().block_on(self.join_handle);
+            println!("DROP!!");
+            self.stop_sender.take().unwrap().send(());
+            tokio::runtime::Handle::try_current().unwrap().block_on(self.join_handle.take().unwrap());
         }
     }
 
@@ -53,7 +41,7 @@ mod BusAccess
             receive_from_bus_and_publish(datalake, server_url, datalake_base_path, rx)
         );
 
-        BusAccessHandle{stop_sender: tx, join_handle: join_handle}
+        BusAccessHandle{stop_sender: Some(tx), join_handle: Some(join_handle)}
     }
     async fn receive_from_bus_and_publish(datalake: TDataLake, server_url: String, publish_base_path: String, mut stop_receiver: tokio::sync::oneshot::Receiver<()>)
     {
@@ -84,7 +72,6 @@ mod BusAccess
             tokio::select!
             {
                 grpc_event = resp_stream.next() =>
-                //Either::Left((grpc_event, _)) => 
                 {
                     if let Some(received) = grpc_event
                     {
@@ -108,7 +95,6 @@ mod BusAccess
                     }
                 }
                 _ = &mut stop_receiver =>
-                //Either::Right(_) =>
                 {
                     // Quit
                     break;
@@ -117,10 +103,6 @@ mod BusAccess
         }
     }
 }
-
-//impl Drop for BusAccess 
-//{
-//}
 
 #[tokio::main]
 async fn main() -> ()
