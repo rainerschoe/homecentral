@@ -4,18 +4,19 @@ use data_lake::*;
 //use bus::MessagePackBusAccess;
 //use bus::ConnectionSetup;
 
-use regex::Regex;
 
-pub mod bus {
-    tonic::include_proto!("_");
-}
 //use futures::stream::Stream;
-use tokio_stream::StreamExt;
 
 
 mod BusAccess
 {
-    use crate::*;
+    use regex::Regex;
+    pub mod bus {
+        tonic::include_proto!("_");
+    }
+    use crate::data_lake::*;
+    use tokio_stream::StreamExt;
+
     pub struct BusAccessHandle
     {
         stop_sender: Option<tokio::sync::oneshot::Sender<()>>,
@@ -51,7 +52,7 @@ mod BusAccess
         //    rx_mask: "255:255".into(),
         //    remote_address: "255:255".into(),
         //});
-        let req = crate::bus::ConnectionSetup {
+        let req = bus::ConnectionSetup {
             rx_mask: "0:255".into(),
             remote_address: "0:1".into(),
         };
@@ -115,8 +116,19 @@ async fn main() -> ()
     let mut sub = datalake.subscribe::<String>(&"/bus/rx/*".parse().unwrap()).await;
     loop
     {
-        let data = sub.receiver.recv().await;
-        println!("rx: {}", data.unwrap());
+        tokio::select!
+        {
+            data = sub.receiver.recv() =>
+            {
+                println!("rx: {}", data.unwrap());
+            }
+            s = tokio::signal::ctrl_c() =>
+            {
+                s.unwrap();
+                println!("ctrl-c received!");
+                break;
+            }
+        }
     }
 
     //bus_handle.stop();

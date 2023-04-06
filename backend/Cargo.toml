@@ -6,7 +6,7 @@ edition = "2021"
 
 
 [dependencies]
-tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros", "signal"] }
 by_address = {version = "1"}
 tonic = "0.8"
 prost = "0.11"
