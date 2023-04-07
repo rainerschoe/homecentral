@@ -48,28 +48,19 @@ mod BusAccess
     {
         let mut client = bus::message_pack_bus_access_client::MessagePackBusAccessClient::connect(server_url).await.unwrap();
 
-        //let request = tonic::Request::new(bus::ConnectionSetup {
-        //    rx_mask: "255:255".into(),
-        //    remote_address: "255:255".into(),
-        //});
         let req = bus::ConnectionSetup {
             rx_mask: "0:255".into(),
             remote_address: "0:1".into(),
         };
-        //let req = bus::SendJsonMessageRequest {
-        //    remote_address: "200:1".into(),
-        //    data: "{}".into(),
-        //    timeout_milliseconds: 5000
-        //};
+        // receive from bus (data to send to data lake):
         let response = client.receive(req).await.unwrap();
-        // I think proto filename needs to match
-
         let mut resp_stream = response.into_inner();
+
+        // receive from lake (data to send to bus)
+        let fisher = datalake.subscribe("/bus/tx".parse().unwrap())
         
         loop
         {
-            //let wait = futures::future::select(resp_stream.next(), stop_receiver);
-            //match wait.await 
             tokio::select!
             {
                 grpc_event = resp_stream.next() =>
@@ -94,6 +85,17 @@ mod BusAccess
                         // TODO reconnect here
                         break;
                     }
+                }
+                transmit_request = fisher.receive() =>
+                {
+                    let req = bus::SendJsonMessageRequest {
+                        remote_address: transmit_request.device_id + ":1",
+                        data: transmit_request.json_payload,
+                        timeout_milliseconds: 5000
+                    };
+                    let result = client.send(req).await;
+                    // TODO: this will block the select?
+                    // handle result
                 }
                 _ = &mut stop_receiver =>
                 {

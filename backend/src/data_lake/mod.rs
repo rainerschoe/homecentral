@@ -54,6 +54,14 @@ pub struct Fisher<T>
     pub receiver: tokio::sync::mpsc::Receiver<T>,
 }
 
+impl<T> Fisher<T>
+{
+    async fn receive(self: &Self)
+    {
+        receiver.recv().await
+    }
+}
+
 impl DataLake
 {
 
