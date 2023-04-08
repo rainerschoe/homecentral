@@ -50,7 +50,10 @@ mod bus_access
 
         BusAccessHandle{stop_sender: Some(tx), join_handle: Some(join_handle)}
     }
-    async fn receive_from_bus_and_publish(mut datalake: TDataLake, server_url: String, publish_base_path: String, mut stop_receiver: tokio::sync::oneshot::Receiver<()>)
+
+    /// will publish received bus messages to <datalake_base_path>/rx/<device_id>
+    /// will send all messages to the bus which are published to <datalake_base_path>/tx
+    async fn receive_from_bus_and_publish(mut datalake: TDataLake, server_url: String, datalake_base_path: String, mut stop_receiver: tokio::sync::oneshot::Receiver<()>)
     {
         let mut client = bus::message_pack_bus_access_client::MessagePackBusAccessClient::connect(server_url).await.unwrap();
 
@@ -63,7 +66,7 @@ mod bus_access
         let mut resp_stream = response.into_inner();
 
         // receive from lake (data to send to bus)
-        let mut fisher = datalake.subscribe::<TransmitRequest>(&"/bus/tx".parse().unwrap()).await;
+        let mut fisher = datalake.subscribe::<TransmitRequest>(&((datalake_base_path.clone() + "tx").as_str().parse().unwrap())).await;
         
         loop
         {
@@ -82,7 +85,7 @@ mod bus_access
                         {
                             if let Some(device_id) = captures.get(1)
                             {
-                                datalake.publish(&(publish_base_path.clone() + device_id.as_str()).as_str().parse().unwrap(), received.data).await;
+                                datalake.publish(&(datalake_base_path.clone() + "rx/" + device_id.as_str()).as_str().parse().unwrap(), received.data).await;
                             }
                         }
                     }
@@ -118,7 +121,7 @@ async fn main() -> ()
 {
     let mut datalake = TDataLake::new();
 
-    let _bus_handle = bus_access::create(datalake.clone(), "http://192.168.0.200:50051".into(), "bus/receive/ug".into());
+    let _bus_handle = bus_access::create(datalake.clone(), "http://192.168.0.200:50051".into(), "/bus/ug".into());
 
 
     let mut sub = datalake.subscribe::<String>(&"/bus/rx/*".parse().unwrap()).await;
