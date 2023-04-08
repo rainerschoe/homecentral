@@ -17,6 +17,12 @@ mod BusAccess
     use crate::data_lake::*;
     use tokio_stream::StreamExt;
 
+    pub struct TransmitRequest
+    {
+        device_id : String,
+        json_payload : String
+    }
+
     pub struct BusAccessHandle
     {
         stop_sender: Option<tokio::sync::oneshot::Sender<()>>,
@@ -44,7 +50,7 @@ mod BusAccess
 
         BusAccessHandle{stop_sender: Some(tx), join_handle: Some(join_handle)}
     }
-    async fn receive_from_bus_and_publish(datalake: TDataLake, server_url: String, publish_base_path: String, mut stop_receiver: tokio::sync::oneshot::Receiver<()>)
+    async fn receive_from_bus_and_publish(mut datalake: TDataLake, server_url: String, publish_base_path: String, mut stop_receiver: tokio::sync::oneshot::Receiver<()>)
     {
         let mut client = bus::message_pack_bus_access_client::MessagePackBusAccessClient::connect(server_url).await.unwrap();
 
@@ -57,7 +63,7 @@ mod BusAccess
         let mut resp_stream = response.into_inner();
 
         // receive from lake (data to send to bus)
-        let fisher = datalake.subscribe("/bus/tx".parse().unwrap())
+        let mut fisher = datalake.subscribe::<TransmitRequest>(&"/bus/tx".parse().unwrap()).await;
         
         loop
         {
@@ -86,7 +92,7 @@ mod BusAccess
                         break;
                     }
                 }
-                transmit_request = fisher.receive() =>
+                Some(transmit_request) = fisher.receive() =>
                 {
                     let req = bus::SendJsonMessageRequest {
                         remote_address: transmit_request.device_id + ":1",

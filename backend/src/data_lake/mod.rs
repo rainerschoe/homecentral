@@ -56,9 +56,9 @@ pub struct Fisher<T>
 
 impl<T> Fisher<T>
 {
-    async fn receive(self: &Self)
+    pub async fn receive(self: &mut Self) -> Option<T>
     {
-        receiver.recv().await
+        self.receiver.recv().await
     }
 }
 
