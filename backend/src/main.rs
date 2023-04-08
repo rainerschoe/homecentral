@@ -8,7 +8,7 @@ use data_lake::*;
 //use futures::stream::Stream;
 
 
-mod BusAccess
+mod bus_access
 {
     use regex::Regex;
     pub mod bus {
@@ -36,14 +36,14 @@ mod BusAccess
         fn drop(self: &mut Self)
         {
             println!("DROP!!");
-            self.stop_sender.take().unwrap().send(());
-            tokio::runtime::Handle::try_current().unwrap().block_on(self.join_handle.take().unwrap());
+            self.stop_sender.take().unwrap().send(()).unwrap();
+            tokio::runtime::Handle::try_current().unwrap().block_on(self.join_handle.take().unwrap()).unwrap();
         }
     }
 
     pub fn create(datalake: TDataLake, server_url: String, datalake_base_path: String) -> BusAccessHandle
     {
-        let (tx, mut rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::task::spawn(
             receive_from_bus_and_publish(datalake, server_url, datalake_base_path, rx)
         );
@@ -80,9 +80,9 @@ mod BusAccess
                         let captures = re.captures(received.remote_address.as_str());
                         if let Some(captures) = captures 
                         {
-                            if let Some(deviceId) = captures.get(1)
+                            if let Some(device_id) = captures.get(1)
                             {
-                                datalake.publish(&("/bus/rx/".to_owned() + deviceId.as_str()).as_str().parse().unwrap(), received.data).await;
+                                datalake.publish(&(publish_base_path.clone() + device_id.as_str()).as_str().parse().unwrap(), received.data).await;
                             }
                         }
                     }
@@ -118,7 +118,7 @@ async fn main() -> ()
 {
     let mut datalake = TDataLake::new();
 
-    let bus_handle = BusAccess::create(datalake.clone(), "http://192.168.0.200:50051".into(), "bus/receive/ug".into());
+    let _bus_handle = bus_access::create(datalake.clone(), "http://192.168.0.200:50051".into(), "bus/receive/ug".into());
 
 
     let mut sub = datalake.subscribe::<String>(&"/bus/rx/*".parse().unwrap()).await;
